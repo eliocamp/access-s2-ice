@@ -1,0 +1,430 @@
+---
+title: "ACCESS-S2 eval"
+format: 
+  revealjs:
+    fig-width: 12
+    fig-height: 6
+execute: 
+  cache: refresh
+---
+
+```{r setup, cache=FALSE}
+library(metR)
+library(ggplot2)
+library(data.table)
+library(patchwork)
+theme_set(theme_minimal())
+
+
+set_day <- function(date) {
+  lubridate::day(date) <- 01
+  as.Date(date)
+}
+```
+
+# HINDCAST
+
+```{r read_data}
+
+access <- "~/Downloads/access_extent.nc" |> 
+  ReadNetCDF(vars = c(extent = "aice")) |> 
+  # _[year(time) <= 2018] |> 
+  _[, time := {lubridate::day(time) <- 01; as.POSIXct(as.Date(time))}] |> 
+  _[, let(lat = NULL, lon = NULL)] |> 
+  _[, tidyr::complete(.SD, time = seq(min(time),
+                                      max(time),
+                                      "1 month"))] |> 
+  as.data.table()
+
+hadisst <- "~/Downloads/hadisst_extent.nc" |> 
+  ReadNetCDF(vars = c(extent = "sic"),
+             subset = list(time = range(access$time))) |>
+  na.omit() |>
+  _[, time := {lubridate::day(time) <- 01; as.POSIXct(as.Date(time))}] |> 
+  _[, let(lat = NULL, lon = NULL)] |> 
+  _[, tidyr::complete(.SD, time = seq(min(time),
+                                      max(time),
+                                      "1 month"))] |> 
+  as.data.table() |> 
+  _[time %between% range(access$time)]
+
+nsidc <- "~/Downloads/nsidc_extent.nc" |> 
+  ReadNetCDF(vars = c(extent = "cdr_seaice_conc_monthly"), 
+             subset = list(time = range(access$time))) |> 
+  _[extent < 1, extent := NA] |> 
+  _[, let(lat = NULL, lon = NULL)] |> 
+  _[, tidyr::complete(.SD, time = seq(min(time),
+                                      max(time),
+                                      "1 month"))] |> 
+  as.data.table() |> 
+  _[time %between% range(access$time)]
+```
+
+## Antarctic Sea Ice Extent
+
+```{r}
+
+extents <- rbind(access = access, hadisst = hadisst, nsidc = nsidc, idcol = "model") |>
+  # _[year(time) <= 2018] |> 
+  _[, extent := Anomaly(extent, year(time) %between% c(1981, 2011), na.rm = TRUE), by = .(model, month(time))] |> 
+  _[, model := forcats::fct_relevel(model, "access", after = Inf)]
+
+
+cors <- extents |> 
+  dcast(time ~ model, value.var = "extent") |> 
+  na.omit() |> 
+  tidyfast::dt_pivot_longer(cols = c(hadisst, nsidc)) |> 
+  _[, cor(access, value), by = .(name)] |> 
+  _[, paste0(name, " = ", scales::number(V1, accuracy = 0.01))] |> 
+  paste0(collapse = "\n")
+
+extents |> 
+  copy() |> 
+  # _[model == "hadisst", extent := extent/2] |> 
+  ggplot(aes(time, extent)) +
+  geom_line(aes(color = model), linewidth = 0.7) +
+  
+  geom_smooth(aes(color = model), method = "lm",
+              formula = y ~ x +
+                I(pmax(x - as.numeric(as.POSIXct("2005-12-01")), 0)) +
+                I(pmax(x - as.numeric(as.POSIXct("2012-12-01")), 0)),
+              n = 80
+  ) +
+  
+  scale_y_continuous("Extent (million km²)",
+                     labels = scales::label_number(scale = 1e-12)) +
+  scale_x_datetime(NULL, expand = c(0, 0)) +
+  scale_color_manual(NULL, 
+                     values = c(access = "black", 
+                                hadisst = "#3584e4", 
+                                nsidc = "#e66100"),
+                     labels = c(access = "ACCESS-S2",
+                                hadisst = "HadISST",
+                                nsidc = "NSIDC CDRV4")) +
+  annotate("text", x = as.POSIXct("1990-01-01"), y = 4*1e12, label = cors, vjust = 1) +
+  theme_minimal() +
+  theme(legend.position = "bottom") 
+
+```
+
+## Antarctic Sea Ice Extent
+
+
+```{r}
+
+correlations <- rbind(nsidc = ReadNetCDF("~/Downloads/correlation_space_nsidc.nc", 
+                                         vars = c(correlation = "cdr_seaice_conc_monthly")) |> 
+                        na.omit() ,
+                      hadisst = ReadNetCDF("~/Downloads/correlation_space_hadisst.nc", 
+                                           vars = c(correlation = "sic")) |> 
+                        na.omit(),
+                      idcol = "dataset") 
+
+# correlations |> 
+#   ggplot(aes(time, correlation)) +
+#   geom_hline(yintercept = 0, linetype = 3) +
+#   geom_line(aes(color = dataset), linewidth = 0.7) +
+#   scale_color_manual(NULL, 
+#                      values = c(access = "black", 
+#                                 hadisst = "#3584e4", 
+#                                 nsidc = "#e66100"),
+#                      labels = c(access = "ACCESS-S2",
+#                                 hadisst = "HadISST",
+#                                 nsidc = "NSIDC CDRV4")) +
+#   theme_minimal() +
+#   scale_y_continuous("Correlation of anomalies") +
+#   scale_x_datetime(NULL, expand = c(0, 0)) +
+#   theme(legend.position = "bottom") 
+
+
+correlations |> 
+  ggplot(aes(month(time), correlation)) +
+  geom_hline(yintercept = 0, linetype = 3) +
+  geom_violin(aes(group = month(time), color = dataset)) +
+  ggforce::geom_sina(aes(group = month(time), color = dataset)) +
+  scale_y_continuous("Correlation of (spatial) anomalies") +
+  scale_x_continuous(NULL, breaks = 1:12, expand = c(0, 0), labels = month.abb) +
+  scale_color_manual(NULL, guide = "none",
+                     values = c(access = "black", 
+                                hadisst = "#3584e4", 
+                                nsidc = "#e66100"),
+                     labels = c(access = "ACCESS-S2",
+                                hadisst = "HadISST",
+                                nsidc = "NSIDC CDRV4")) +
+  facet_wrap(~dataset, ncol = 1, 
+             labeller = labeller(dataset = c(hadisst = "HadISST",
+                                             nsidc = "NSIDC CDRV4")))
+```
+
+## Correlation of anomalies in time 
+
+
+```{r}
+
+correlation_time <- ReadNetCDF("~/Downloads/correlation_time.nc", 
+                               vars = c(correlation = "cdr_seaice_conc_monthly",
+                                        lon = "TLON",
+                                        lat = "TLAT")) |> 
+  na.omit() 
+
+
+map_antarctica <- map_data("world2") |> 
+  as.data.table() |> 
+  _[lat < -50] |> 
+  geom_polygon(data = _, inherit.aes = FALSE, aes(long, lat, group = group), 
+               colour = "black", linewidth = 0.3, fill = NA)
+
+correlation_time |> 
+  _[correlation != 1] |> 
+  _[, month := month(time)] |> 
+  ggplot(aes(lon, lat)) +
+  geom_contour_fill(aes(z = correlation)) +
+  scale_fill_divergent("Correlation") +
+  scale_y_latitude(limits = c(-90, NA), labels = NULL) + 
+  scale_x_longitude() +
+  map_antarctica +
+  coord_polar() + 
+  facet_wrap(~ month, labeller = labeller(month = setNames(month.abb, 1:12))) 
+```
+
+# Forecats
+
+# Forecats 😸
+
+## Initial conditions vs forecast
+
+```{r}
+
+files <- list.files("~/Downloads/correlations", full.names = TRUE) 
+
+read_correlations <- function(files) {
+  
+  
+  dates <- utils::strcapture("mi_aice_(\\d{8})_e(\\d{2})_(\\w+).nc", basename(files),
+                             proto = list(time_forecast = character(),
+                                          member = character(),
+                                          type = character())) |> 
+    as.data.table() |> 
+    _[, time_forecast := as.Date(time_forecast, format = "%Y%m%d")] |> 
+    _[]
+  
+  
+  read <- function(i) {
+    ReadNetCDF(files[[i]], vars = c(value = "aice")) |> 
+      _[, let(lat = NULL, lon = NULL, time = set_day(time))] |> 
+      _[] |> 
+      _[, let(time_forecast = dates$time_forecast[[i]],
+              member = dates$member[[i]],
+              type = dates$type[[i]])] |> 
+      _[] 
+  }
+  
+  lapply(seq_along(files), read) |> 
+    rbindlist() 
+}
+
+geom_cross <- function() {
+  list(geom_hline(yintercept = 0), 
+       geom_vline(xintercept = 0))
+}
+```
+
+```{r}
+cors <- read_correlations(list.files("~/Downloads/correlations", full.names = TRUE)) |> 
+  _[, measure := "correlation"] |> 
+  tidyfast::dt_pivot_wider(names_from = type, values_from = value) |> 
+   _[, let(skill = (forecast - persistence)/(1 - persistence))] 
+
+
+rmse <- read_correlations(list.files("~/Downloads/rmse", full.names = TRUE)) |> 
+  _[, measure := "rmse"] |> 
+  _[value < 0.01, value := NA] |>    # A few forecast have very low values
+  tidyfast::dt_pivot_wider(names_from = type, values_from = value) |> 
+  _[, let(skill = (forecast - persistence)/(0 - persistence))] 
+
+```
+
+```{r}
+skill <- rbind(cors, rmse) |> 
+  _[, let(persistence = NULL)]
+
+initial <- skill[time == time_forecast, .(time_forecast, member, measure, initial = forecast)]
+
+skill <- skill[time != time_forecast] |> 
+  _[initial, on = c("time_forecast", "member", "measure")] |> 
+  _[, let(lead = months_difference(time_forecast, time),
+          verification_season = season(time),
+          forecast_season = season(time_forecast))] 
+```
+
+
+
+```{r}
+skill |> 
+  _[measure == "rmse"] |> 
+  ggplot(aes(skill)) +
+  geom_density(aes(color = factor(lead))) +
+  facet_wrap(lubridate::month(time, label = TRUE)~.)
+```
+
+
+
+
+```{r}
+skill |> 
+  _[measure == "rmse"] |> 
+  na.omit() |> 
+  ggplot(aes(initial, forecast)) +
+  
+  geom_point(size = 0.4) +
+  geom_smooth(method = "lm", color = "#1c71d8", se = FALSE) +
+  # geom_line(data = lines, linewidth = 0.9, color = "#e66100") +
+  scale_x_continuous("Initial conditions") +
+  scale_y_continuous("Forecast") +
+  facet_wrap(~ lead, ncol = 4) +
+  labs(title = "RMSE")
+
+
+last_plot() %+% skill[measure == "correlation"] + 
+  labs(title = "Correlation") +
+  geom_cross()
+```
+
+## Initial conditions vs forecast
+
+```{r}
+skill |> 
+  _[measure == "rmse"] |> 
+  na.omit() |> 
+  ggplot(aes(initial, forecast)) +
+  
+  geom_point(size = 0.4) +
+  geom_smooth(method = "lm", color = "#1c71d8", se = FALSE) +
+  # geom_line(data = lines, linewidth = 0.9, color = "#e66100") +
+  scale_x_continuous("Initial conditions") +
+  scale_y_continuous("Forecast") +
+  facet_grid(forecast_season ~ lead) +
+  labs(title = "RMSE", 
+       subtitle = "As a function of forecast season")
+
+
+last_plot() %+% skill[measure == "correlation"] + 
+  labs(title = "Correlation") +
+  geom_cross()
+```
+
+## Initial conditions vs forecast
+
+
+```{r}
+skill |> 
+  _[measure == "rmse"] |> 
+  na.omit() |> 
+  ggplot(aes(initial, forecast)) +
+  
+  geom_point(size = 0.4) +
+  geom_smooth(method = "lm", color = "#1c71d8", se = FALSE) +
+  # geom_line(data = lines, linewidth = 0.9, color = "#e66100") +
+  scale_x_continuous("Initial conditions") +
+  scale_y_continuous("Forecast") +
+  facet_grid(verification_season ~ lead) +
+  labs(title = "RMSE", 
+       subtitle = "As a function of verification season")
+
+
+last_plot() %+% skill[measure == "correlation"] + 
+  labs(title = "Correlation") +
+  geom_cross()
+```
+
+```{r}
+skill |> 
+  _[measure == "correlation"] |> 
+  na.omit() |> 
+  ggplot(aes(initial, skill)) +
+  geom_point(size = 0.4) +
+  geom_smooth(method = "lm", color = "#1c71d8", se = FALSE) +
+  # geom_line(data = lines, linewidth = 0.9, color = "#e66100") +
+  scale_x_continuous("Initial conditions") +
+  scale_y_continuous("Skill") +
+  facet_grid(verification_season ~ lead) +
+  labs(title = "RMSE skill compared with persistence", 
+       subtitle = "As a function of verification season")
+
+
+last_plot() %+% skill[measure == "correlation"] + 
+  labs(title = "Correlation") +
+  geom_cross()
+```
+
+
+```{r}
+model <- cors[time != time_forecast] |> 
+  _[initial, on = c("time_forecast", "member")] |> 
+  _[, lead := months_difference(time_forecast, time)] |> 
+  _[, let(fisher = atanh(correlation), 
+          i.fisher = atanh(i.correlation),
+          season = season(time_forecast))] |>  
+  lm(fisher ~ season*i.fisher*log(lead) - 1, data = _)
+
+
+lines <- CJ(i.correlation = seq(-0, 1, length.out = 20),
+            lead = seq(1, 8, length.out = 8),
+            # month = lubridate::month(1:12, label = TRUE, abbr = TRUE)) |> 
+            season = season(c(1, 4, 6, 9))) |>
+  _[, let(i.fisher = atanh(i.correlation))] |> 
+  
+  _[, fisher := predict(model, newdata = .SD)] |> 
+  _[, correlation := tanh(fisher)] 
+```
+
+## Initial conditions vs forecast
+
+```{r}
+cor_plot +
+  geom_line(data = lines, linewidth = 1, colour = "#e66100")
+```
+
+## Initial conditions vs forecast
+
+```{r}
+CJ(i.correlation = .99,
+   lead = c(0, seq(1, 8, length.out = 20)),
+   season = season(c(1, 4, 6, 9))) |> 
+  _[, let(i.fisher = atanh(i.correlation))] |> 
+  
+  _[, fisher := predict(model, newdata = .SD)] |> 
+  _[, correlation := tanh(fisher)] |> 
+  _[lead == 0, correlation := i.correlation] |>
+  ggplot(aes(lead, correlation)) +
+  geom_line(data = \(x) copy(x)[lead != 0][, let(season2 = season, season = NULL)],
+            aes(group = season2), color = "gray", alpha =  0.8) +
+  geom_line(data = \(x) x[lead != 0]) +
+  geom_point(data = \(x) x[lead == 0]) +
+  facet_wrap(~season, ncol = 2) +
+  scale_x_continuous("Lead time", breaks = 0:12, minor_breaks = NULL) +
+  scale_y_continuous("Correlation") +
+  labs(caption = "season at forecast time") 
+
+```
+
+## Warning: the linear model is rubbish
+
+```{r}
+predicted <- data.table(season = model$model$season,
+                        residuals = tanh(model$residuals),
+                        predicted = tanh(model$fitted.values))
+
+predicted |> 
+  ggplot(aes(predicted, residuals)) + 
+  geom_point() +
+  geom_smooth() +
+  
+  predicted |> 
+  ggplot(aes(sample = residuals)) + 
+  geom_qq() +
+  geom_qq_line() &
+  
+  facet_wrap(~season, ncol = 4) &
+  plot_layout(ncol = 1)
+```
