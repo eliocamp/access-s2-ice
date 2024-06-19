@@ -9,8 +9,9 @@ curl $url -o $hadisst_data.gz
 gunzip $hadisst_data.gz
 
 temp=$(mktemp)
-cdo -L selname,sic $hadisst_data ${temp}
+cdo -L setday,1 -selname,sic $hadisst_data ${temp}
 mv ${temp} ${hadisst_data}
+
 
 
 # Select only data I care about

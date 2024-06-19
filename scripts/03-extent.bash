@@ -18,12 +18,15 @@ access_extent=${data_derived}/access_extent.nc
 
 echo "--- Computing sea ACCESS-S2 extent"
 cdo -L -fldsum -mul -gtc,0.15 ${access_data} -gridarea ${access_data} ${access_extent}
+cdo -L -fldsum -mul ${access_data} -gridarea ${access_data} $data_derived/$(basename $access_extent _extent.nc)_area.nc
 
 echo "--- Computing sea HadISST extent"
 cdo -L -fldsum -mul -gtc,0.15 ${hadisst_data} -gridarea ${hadisst_data} ${hadisst_extent}
+cdo -L -fldsum -mul ${hadisst_data} -gridarea ${hadisst_data} $data_derived/$(basename $hadisst_extent _extent.nc)_area.nc
 
 echo "--- Computing sea NSIDC extent"
 cdo -L -fldsum -mul -gtc,0.15 ${nsidc_data} -gridarea ${nsidc_data} ${nsidc_extent}
+cdo -L -fldsum -mul ${nsidc_data} -gridarea ${nsidc_data} $data_derived/$(basename $nsidc_extent _extent.nc)_area.nc
 
 nsidc_temp=$(mktemp)
 access_temp=$(mktemp)
@@ -46,9 +49,11 @@ temp_dir=`mktemp -d /tmp/cdo_ymoncorr.XXXXXXXXXXXX`
 mon_list="01 02 03 04 05 06 07 08 09 10 11 12" 
 
 for mon in $mon_list ; do
-    cdo -L timcor -selmon,$mon $nsidc_temp -selmon,$mon $access_temp $temp_dir/corr_$mon.nc
+    cdo -L timcor -selmon,$mon $nsidc_temp -selmon,$mon $access_temp $temp_dir/cor_$mon.nc
+    cdo -L timcovar -selmon,$mon $nsidc_temp -selmon,$mon $access_temp $temp_dir/cov_$mon.nc
 done
 
-cdo -L -O mergetime ${temp_dir}/corr_??.nc $data_derived/correlation_time.nc
+cdo -L -O mergetime ${temp_dir}/cor_??.nc $data_derived/correlation_time.nc
+cdo -L -O mergetime ${temp_dir}/cov_??.nc $data_derived/covariance_time.nc
 rm -rf $temp_dir
 

@@ -7,6 +7,8 @@ temp_access_anom=$(mktemp)
 persistence=$(mktemp)
 temp_nsidc=$(mktemp)
 
+Acá la persistencia está mal. Tiene que ser la persitencia del valor del día en el que se hizo el prono, no el promedio del mes!!!
+
 for ensemble in "01" "02" "03"; do 
     dir=/g/data/ux62/access-s2/hindcast/raw_model/ice/aice/monthly/e$ensemble
     for file in $dir/mi_aice_??????01_e${ensemble}.nc; do

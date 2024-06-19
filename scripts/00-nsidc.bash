@@ -5,18 +5,12 @@ nsidc_file="nsidc.nc"
 nsidc_grid_file="nsidc_grid.nc"
 nsidc_data=${data_path}/${nsidc_file}
 
-if [ ! -f ${nsidc_data} ]; then
-    echo "Downloading NSDCI data"
-    curl --globoff ${nsidc_url} -o ${nsidc_data}
-fi
+
+echo "Downloading NSDCI data"
+curl --globoff ${nsidc_url} -o ${nsidc_data}
 
 temp=$(mktemp)
-cdo setvrange,0,1 ${nsidc_data} ${temp} 
-mv ${temp} ${nsidc_data}
-
-
-temp=$(mktemp)
-cdo setgrid,data/data_derived/nsidc_grid.txt ${nsidc_data} ${temp}
+cdo -L setvrange,0,1 -setgrid,data/data_derived/nsidc_grid.txt ${nsidc_data} ${temp}
 mv ${temp} ${nsidc_data}
 
 
