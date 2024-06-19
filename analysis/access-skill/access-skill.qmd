@@ -20,13 +20,14 @@ set_day <- function(date) {
   lubridate::day(date) <- 01
   as.Date(date)
 }
+data <- here::here("data/data_derived")
 ```
 
 # HINDCAST
 
 ```{r read_data}
 
-access <- "~/Downloads/access_extent.nc" |> 
+access <- file.path(data, "access_extent.nc") |> 
   ReadNetCDF(vars = c(extent = "aice")) |> 
   # _[year(time) <= 2018] |> 
   _[, time := {lubridate::day(time) <- 01; as.POSIXct(as.Date(time))}] |> 
@@ -36,7 +37,7 @@ access <- "~/Downloads/access_extent.nc" |>
                                       "1 month"))] |> 
   as.data.table()
 
-hadisst <- "~/Downloads/hadisst_extent.nc" |> 
+hadisst <- file.path(data, "hadisst_extent.nc") |> 
   ReadNetCDF(vars = c(extent = "sic"),
              subset = list(time = range(access$time))) |>
   na.omit() |>
@@ -48,7 +49,7 @@ hadisst <- "~/Downloads/hadisst_extent.nc" |>
   as.data.table() |> 
   _[time %between% range(access$time)]
 
-nsidc <- "~/Downloads/nsidc_extent.nc" |> 
+nsidc <- file.path(data, "nsidc_extent.nc") |> 
   ReadNetCDF(vars = c(extent = "cdr_seaice_conc_monthly"), 
              subset = list(time = range(access$time))) |> 
   _[extent < 1, extent := NA] |> 
@@ -112,10 +113,10 @@ extents |>
 
 ```{r}
 
-correlations <- rbind(nsidc = ReadNetCDF("~/Downloads/correlation_space_nsidc.nc", 
+correlations <- rbind(nsidc = ReadNetCDF(file.path(data, "correlation_space_nsidc.nc"), 
                                          vars = c(correlation = "cdr_seaice_conc_monthly")) |> 
                         na.omit() ,
-                      hadisst = ReadNetCDF("~/Downloads/correlation_space_hadisst.nc", 
+                      hadisst = ReadNetCDF(file.path(data, "correlation_space_hadisst.nc"), 
                                            vars = c(correlation = "sic")) |> 
                         na.omit(),
                       idcol = "dataset") 
@@ -161,7 +162,7 @@ correlations |>
 
 ```{r}
 
-correlation_time <- ReadNetCDF("~/Downloads/correlation_time.nc", 
+correlation_time <- ReadNetCDF(file.path(data, "correlation_time.nc"), 
                                vars = c(correlation = "cdr_seaice_conc_monthly",
                                         lon = "TLON",
                                         lat = "TLAT")) |> 
@@ -194,12 +195,9 @@ correlation_time |>
 ## Initial conditions vs forecast
 
 ```{r}
+files <- list.files(file.path(data, "correlations"), full.names = TRUE) 
 
-files <- list.files("~/Downloads/correlations", full.names = TRUE) 
-
-read_correlations <- function(files) {
-  
-  
+read_correlations <- function(files) {  
   dates <- utils::strcapture("mi_aice_(\\d{8})_e(\\d{2})_(\\w+).nc", basename(files),
                              proto = list(time_forecast = character(),
                                           member = character(),
@@ -207,7 +205,6 @@ read_correlations <- function(files) {
     as.data.table() |> 
     _[, time_forecast := as.Date(time_forecast, format = "%Y%m%d")] |> 
     _[]
-  
   
   read <- function(i) {
     ReadNetCDF(files[[i]], vars = c(value = "aice")) |> 
@@ -230,13 +227,13 @@ geom_cross <- function() {
 ```
 
 ```{r}
-cors <- read_correlations(list.files("~/Downloads/correlations", full.names = TRUE)) |> 
+cors <- read_correlations(list.files(file.path(data, "correlations"), full.names = TRUE)) |> 
   _[, measure := "correlation"] |> 
   tidyfast::dt_pivot_wider(names_from = type, values_from = value) |> 
    _[, let(skill = (forecast - persistence)/(1 - persistence))] 
 
 
-rmse <- read_correlations(list.files("~/Downloads/rmse", full.names = TRUE)) |> 
+rmse <- read_correlations(list.files(file.path(data, "rmse"), full.names = TRUE)) |> 
   _[, measure := "rmse"] |> 
   _[value < 0.01, value := NA] |>    # A few forecast have very low values
   tidyfast::dt_pivot_wider(names_from = type, values_from = value) |> 
