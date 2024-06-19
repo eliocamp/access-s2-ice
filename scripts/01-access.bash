@@ -5,7 +5,7 @@ access_data_dir="/g/data/ux62/access-s2/reanalysis/ice/aice"
 top_lat=-47
 access_susbet_data=${data_derived}/access_subset.nc
 echo "Selecting ACCESS-S2 data south of $top_lat"
-cdo -L sellonlatbox,0,360,-90,${top_lat} -cat ${access_data_dir}/mi_aice_*.nc ${access_susbet_data}
+cdo -L setday,1 -sellonlatbox,0,360,-90,${top_lat} -cat ${access_data_dir}/mi_aice_*.nc ${access_susbet_data}
 
 # Compute climatolgy
 access_climatology=${data_derived}/access_climatology.nc
