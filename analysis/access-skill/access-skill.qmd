@@ -27,74 +27,78 @@ data <- here::here("data/data_derived")
 
 ```{r read_data}
 
-access <- file.path(data, "access_extent.nc") |> 
-  ReadNetCDF(vars = c(extent = "aice")) |> 
-  # _[year(time) <= 2018] |> 
-  _[, time := {lubridate::day(time) <- 01; as.POSIXct(as.Date(time))}] |> 
-  _[, let(lat = NULL, lon = NULL)] |> 
-  _[, tidyr::complete(.SD, time = seq(min(time),
-                                      max(time),
-                                      "1 month"))] |> 
-  as.data.table()
+read_extent <- function(extent, area, name = "aice", range = NULL) {
+  if (!is.null(range)) {
+    range <- list(time = range)
+  }
+  extent <- ReadNetCDF(extent, vars = c(extent = name),
+                       subset = range)
+  
+  area <- ReadNetCDF(area, vars = c(area = name),
+                     subset = range)
+  
+  extent[area, on = .NATURAL] |>  
+    _[, time := as.Date(time)] |> 
+    _[, let(lat = NULL, lon = NULL)] |> 
+    _[, tidyr::complete(.SD, time = seq(min(time),
+                                        max(time),
+                                        "1 month"))] |> 
+    as.data.table() |> 
+    melt(id.vars = c("time"))
+}
 
-hadisst <- file.path(data, "hadisst_extent.nc") |> 
-  ReadNetCDF(vars = c(extent = "sic"),
-             subset = list(time = range(access$time))) |>
-  na.omit() |>
-  _[, time := {lubridate::day(time) <- 01; as.POSIXct(as.Date(time))}] |> 
-  _[, let(lat = NULL, lon = NULL)] |> 
-  _[, tidyr::complete(.SD, time = seq(min(time),
-                                      max(time),
-                                      "1 month"))] |> 
-  as.data.table() |> 
-  _[time %between% range(access$time)]
+access <- read_extent(file.path(data, "access_extent.nc"), 
+                      file.path(data, "access_area.nc"))
 
-nsidc <- file.path(data, "nsidc_extent.nc") |> 
-  ReadNetCDF(vars = c(extent = "cdr_seaice_conc_monthly"), 
-             subset = list(time = range(access$time))) |> 
-  _[extent < 1, extent := NA] |> 
-  _[, let(lat = NULL, lon = NULL)] |> 
-  _[, tidyr::complete(.SD, time = seq(min(time),
-                                      max(time),
-                                      "1 month"))] |> 
-  as.data.table() |> 
-  _[time %between% range(access$time)]
+range_access <- range(access$time)
+
+hadisst <- read_extent(file.path(data, "hadisst_extent.nc"), 
+                       file.path(data, "hadisst_area.nc"),
+                       name = "sic",
+                       range = range_access)
+
+
+nsidc <- read_extent(file.path(data, "nsidc_extent.nc"), 
+                     file.path(data, "nsidc_area.nc"),
+                     name = "cdr_seaice_conc_monthly",
+                     range = range_access)
+
 ```
 
-## Antarctic Sea Ice Extent
+## Antarctic Sea Ice Extent/Area
 
 ```{r}
-
 extents <- rbind(access = access, hadisst = hadisst, nsidc = nsidc, idcol = "model") |>
-  # _[year(time) <= 2018] |> 
-  _[, extent := Anomaly(extent, year(time) %between% c(1981, 2011), na.rm = TRUE), by = .(model, month(time))] |> 
+  _[value == 0, value := NA] |>  # Problems with NSIDC
+  _[, value := Anomaly(value, year(time) %between% c(1981, 2011), na.rm = TRUE), 
+    by = .(model, variable, month(time))] |> 
   _[, model := forcats::fct_relevel(model, "access", after = Inf)]
 
 
-cors <- extents |> 
-  dcast(time ~ model, value.var = "extent") |> 
-  na.omit() |> 
-  tidyfast::dt_pivot_longer(cols = c(hadisst, nsidc)) |> 
-  _[, cor(access, value), by = .(name)] |> 
-  _[, paste0(name, " = ", scales::number(V1, accuracy = 0.01))] |> 
-  paste0(collapse = "\n")
+cors <- extents |>
+  _[, widyr::pairwise_cor(.SD, model, time, value, use = "complete.obs",
+                          diag = FALSE, upper = FALSE), 
+    by = variable] |> 
+  _[, paste0("r(", item1, ", ", item2, ") = ", scales::number(correlation, accuracy = 0.01)) |> 
+      paste0(collapse = "\n"), 
+    by = variable] 
 
 extents |> 
   copy() |> 
   # _[model == "hadisst", extent := extent/2] |> 
-  ggplot(aes(time, extent)) +
+  ggplot(aes(time, value)) +
   geom_line(aes(color = model), linewidth = 0.7) +
   
   geom_smooth(aes(color = model), method = "lm",
               formula = y ~ x +
-                I(pmax(x - as.numeric(as.POSIXct("2005-12-01")), 0)) +
-                I(pmax(x - as.numeric(as.POSIXct("2012-12-01")), 0)),
-              n = 80
+                I(pmax(x - as.numeric(as.Date("2005-12-01")), 0)) +
+                I(pmax(x - as.numeric(as.Date("2012-12-01")), 0)),
+              n = 100
   ) +
   
-  scale_y_continuous("Extent (million km²)",
+  scale_y_continuous("Extent/area (million km²)",
                      labels = scales::label_number(scale = 1e-12)) +
-  scale_x_datetime(NULL, expand = c(0, 0)) +
+  scale_x_date(NULL, expand = c(0, 0)) +
   scale_color_manual(NULL, 
                      values = c(access = "black", 
                                 hadisst = "#3584e4", 
@@ -102,14 +106,31 @@ extents |>
                      labels = c(access = "ACCESS-S2",
                                 hadisst = "HadISST",
                                 nsidc = "NSIDC CDRV4")) +
-  annotate("text", x = as.POSIXct("1990-01-01"), y = 4*1e12, label = cors, vjust = 1) +
+  geom_text(data = cors, aes(x = as.Date("1990-01-01"), y = 4*1e12, label = V1), vjust = 1) +
   theme_minimal() +
-  theme(legend.position = "bottom") 
+  theme(legend.position = "bottom") +
+  facet_wrap(~ variable, ncol = 1)
 
 ```
 
-## Antarctic Sea Ice Extent
 
+## Antarctic Sea Ice Extent/Area
+
+```{r}
+extents |> 
+  dcast(time + variable ~ model, value.var = "value") |> 
+  melt(id.vars= c("time", "variable", "access"), variable.name = "model") |> 
+  ggplot(aes(value, access)) +
+  geom_point(size = 0.4) +
+  geom_smooth() +
+  scale_y_continuous("Extent/area (million km²)",
+                     labels = scales::label_number(scale = 1e-12)) +
+  scale_x_continuous("Extent/area (million km²)",
+                     labels = scales::label_number(scale = 1e-12)) +
+  facet_grid(variable~model)
+```
+
+## Spatial correlation of anomalies
 
 ```{r}
 
@@ -157,18 +178,9 @@ correlations |>
                                              nsidc = "NSIDC CDRV4")))
 ```
 
-## Correlation of anomalies in time 
-
+## Time correlation of anomalies
 
 ```{r}
-
-correlation_time <- ReadNetCDF(file.path(data, "correlation_time.nc"), 
-                               vars = c(correlation = "cdr_seaice_conc_monthly",
-                                        lon = "TLON",
-                                        lat = "TLAT")) |> 
-  na.omit() 
-
-
 map_antarctica <- map_data("world2") |> 
   as.data.table() |> 
   _[lat < -50] |> 
@@ -176,7 +188,6 @@ map_antarctica <- map_data("world2") |>
                colour = "black", linewidth = 0.3, fill = NA)
 
 correlation_time |> 
-  _[correlation != 1] |> 
   _[, month := month(time)] |> 
   ggplot(aes(lon, lat)) +
   geom_contour_fill(aes(z = correlation)) +
@@ -186,6 +197,24 @@ correlation_time |>
   map_antarctica +
   coord_polar() + 
   facet_wrap(~ month, labeller = labeller(month = setNames(month.abb, 1:12))) 
+```
+
+
+---
+
+Why is the correlation so high in the anomalies, but so low in the area? 
+
+---
+
+It's not really that high
+
+```{r}
+correlation_time |> 
+  _[correlation != 1] |> 
+  _[, month := lubridate::month(time, label = TRUE, abbr = TRUE)] |> 
+  ggplot(aes(correlation)) +
+  geom_density(aes(weight = cos(lat*pi/180))) +
+  facet_wrap(~month)
 ```
 
 # Forecats
@@ -230,7 +259,7 @@ geom_cross <- function() {
 cors <- read_correlations(list.files(file.path(data, "correlations"), full.names = TRUE)) |> 
   _[, measure := "correlation"] |> 
   tidyfast::dt_pivot_wider(names_from = type, values_from = value) |> 
-   _[, let(skill = (forecast - persistence)/(1 - persistence))] 
+  _[, let(skill = (forecast - persistence)/(1 - persistence))] 
 
 
 rmse <- read_correlations(list.files(file.path(data, "rmse"), full.names = TRUE)) |> 
@@ -254,6 +283,21 @@ skill <- skill[time != time_forecast] |>
           forecast_season = season(time_forecast))] 
 ```
 
+
+```{r}
+rbind(cors, rmse) |> 
+  _[month(time_forecast) %in% c(02, 05, 08, 11)] |> 
+  melt(id.vars = c("time", "time_forecast", "member", "measure"),
+       measure.vars = c("forecast", "persistence")) |> 
+  _[, lead := months_difference(time_forecast, time)] |> 
+  _[measure == "rmse"] |> 
+  _[lead <= 6] |> 
+  _[, .(value = mean(value, na.rm = TRUE)), 
+    by = .(lead, month(time_forecast), measure, variable)] |> 
+  ggplot(aes(lead, value)) +
+  geom_line(aes(color = variable)) +
+  facet_grid(month ~ measure)
+```
 
 
 ```{r}
