@@ -1,32 +1,18 @@
-# Compute sea ice extent
-data_derived="data/data_derived"
-data_raw="data/data_raw"
-
-nsidc_data=${data_raw}/nsidc.nc
-nsidc_anomaly="data/data_derived/nsidc_anomaly.nc"
-
-hadisst_data=${data_raw}/hadisst.nc
-hadisst_anomaly=${data_derived}/hadisst_anomaly.nc
-
-access_data=${data_derived}/access_subset.nc
-access_anomaly=${data_derived}/access_anomaly.nc
+source scripts/variables.bash
 
 # Compute sea ice extent
-nsidc_extent=${data_derived}/nsidc_extent.nc
-hadisst_extent=${data_derived}/hadisst_extent.nc
-access_extent=${data_derived}/access_extent.nc
 
 echo "--- Computing sea ACCESS-S2 extent"
-cdo -L -fldsum -mul -gtc,0.15 ${access_data} -gridarea ${access_data} ${access_extent}
-cdo -L -fldsum -mul ${access_data} -gridarea ${access_data} $data_derived/$(basename $access_extent _extent.nc)_area.nc
+cdo -L -fldsum -mul -gtc,0.15 $access_susbet_data -gridarea $access_susbet_data $access_extent
+cdo -L -fldsum -mul $access_susbet_data -gridarea $access_susbet_data $data_derived/$(basename $access_extent _extent.nc)_area.nc
 
 echo "--- Computing sea HadISST extent"
-cdo -L -fldsum -mul -gtc,0.15 ${hadisst_data} -gridarea ${hadisst_data} ${hadisst_extent}
-cdo -L -fldsum -mul ${hadisst_data} -gridarea ${hadisst_data} $data_derived/$(basename $hadisst_extent _extent.nc)_area.nc
+cdo -L -fldsum -mul -gtc,0.15 $hadisst_data -gridarea $hadisst_data $hadisst_extent
+cdo -L -fldsum -mul $hadisst_data -gridarea $hadisst_data $data_derived/$(basename $hadisst_extent _extent.nc)_area.nc
 
 echo "--- Computing sea NSIDC extent"
-cdo -L -fldsum -mul -gtc,0.15 ${nsidc_data} -gridarea ${nsidc_data} ${nsidc_extent}
-cdo -L -fldsum -mul ${nsidc_data} -gridarea ${nsidc_data} $data_derived/$(basename $nsidc_extent _extent.nc)_area.nc
+cdo -L -fldsum -mul -gtc,0.15 $nsidc_data -gridarea $nsidc_data $nsidc_extent
+cdo -L -fldsum -mul $nsidc_data -gridarea $nsidc_data $data_derived/$(basename $nsidc_extent _extent.nc)_area.nc
 
 nsidc_temp=$(mktemp)
 access_temp=$(mktemp)
@@ -53,7 +39,7 @@ for mon in $mon_list ; do
     cdo -L timcovar -selmon,$mon $nsidc_temp -selmon,$mon $access_temp $temp_dir/cov_$mon.nc
 done
 
-cdo -L -O mergetime ${temp_dir}/cor_??.nc $data_derived/correlation_time.nc
-cdo -L -O mergetime ${temp_dir}/cov_??.nc $data_derived/covariance_time.nc
+cdo -L -O mergetime $temp_dir/cor_??.nc $data_derived/correlation_time.nc
+cdo -L -O mergetime $temp_dir/cov_??.nc $data_derived/covariance_time.nc
 rm -rf $temp_dir
 
