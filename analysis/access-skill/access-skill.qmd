@@ -13,7 +13,7 @@ library(metR)
 library(ggplot2)
 library(data.table)
 library(patchwork)
-theme_set(theme_minimal())
+theme_set(theme_minimal() + theme(legend.position = "bottom"))
 
 
 set_day <- function(date) {
@@ -21,6 +21,11 @@ set_day <- function(date) {
   as.Date(date)
 }
 data <- here::here("data/data_derived")
+
+months_difference <- function(x, y) {
+  lubridate::interval(x, y) %/% months(1)
+}
+
 ```
 
 # HINDCAST
@@ -113,7 +118,6 @@ extents |>
 
 ```
 
-
 ## Antarctic Sea Ice Extent/Area
 
 ```{r}
@@ -181,6 +185,15 @@ correlations |>
 ## Time correlation of anomalies
 
 ```{r}
+
+correlation_time <- ReadNetCDF(file.path(data, "correlation_time.nc"), 
+                               vars = c(correlation = "cdr_seaice_conc_monthly",
+                                        lon = "TLON",
+                                        lat = "TLAT")) |> 
+  
+  na.omit() |> 
+  _[correlation != 1]
+
 map_antarctica <- map_data("world2") |> 
   as.data.table() |> 
   _[lat < -50] |> 
@@ -199,14 +212,13 @@ correlation_time |>
   facet_wrap(~ month, labeller = labeller(month = setNames(month.abb, 1:12))) 
 ```
 
+------------------------------------------------------------------------
 
----
+Why is the correlation so high in the anomalies, but so low in the area?
 
-Why is the correlation so high in the anomalies, but so low in the area? 
+------------------------------------------------------------------------
 
----
-
-It's not really that high
+It's not really that high.
 
 ```{r}
 correlation_time |> 
@@ -217,15 +229,117 @@ correlation_time |>
   facet_wrap(~month)
 ```
 
-# Forecats
-
-# Forecats 😸
-
-## Initial conditions vs forecast
+## Extent vs. SST 
 
 ```{r}
-files <- list.files(file.path(data, "correlations"), full.names = TRUE) 
+sst <- rbind(file.path(data, "access_sst.nc") |> 
+               ReadNetCDF(var = "sst") |> 
+               _[, model := "access"] |> 
+               _[, let(deptht = NULL,
+                       time = as.Date(time_counter),
+                       time_counter = NULL)],
+             file.path(data, "era5_sst.nc") |> 
+               ReadNetCDF(var = "sst") |> 
+               _[, model := "era5"] |> 
+               _[, time := as.Date(time)]) |> 
+  _[, let(lon = NULL, lat = NULL)]
 
+
+
+sst[, sst := Anomaly(sst, year(time) %between% c(1981, 2011)), by = .(model, month(time))]
+
+
+extents[model %in% c("access", "hadisst") & variable == "extent"] |> 
+  dcast(time + model ~ variable, value.var = "value") |> 
+  _[model != "access", model := "era5"] |> 
+  _[sst, on = .NATURAL] |> 
+  melt(id.vars = c("time", "model")) |> 
+  _[, value := scale(value, scale = sd(value[year(time) %between% c(1981, 2011)])), by = .(model, variable)] |> 
+  _[variable == "sst", value := -value] |> 
+  _[model != "access", model := "observations (ERA5 + HadISST)"] |> 
+  ggplot(aes(time, value)) +
+  geom_line(aes(color = variable)) +
+  scale_y_continuous("Scaled value (sst reversed)") +
+  scale_x_date(NULL) +
+  facet_wrap(~model, ncol = 1)
+  
+```
+
+## Extent vs. SST
+
+```{r}
+
+extents[model %in% c("access", "hadisst") & variable == "extent"] |> 
+  dcast(time + model ~ variable, value.var = "value") |> 
+  _[model != "access", model := "era5"] |> 
+  _[sst, on = .NATURAL] |> 
+  melt(id.vars = c("time", "model")) |> 
+  _[, value := scale(value, scale = sd(value[year(time) %between% c(1981, 2011)])), by = .(model, variable)] |> 
+  _[variable == "sst", value := -value] |> 
+  _[model != "access", model := "observations (ERA5 + HadISST)"] |> 
+  dcast(time + model ~ variable, value.var = "value") |> 
+  ggplot(aes(extent, sst)) +
+  geom_point() +
+  geom_smooth(method = "lm")  +
+  geom_text(data = \(x) x[, cor(extent, sst, use = "complete.obs"), by = model],
+            aes(label = scales::number(V1, prefix = "r=")), 
+            x = 3, y = -4) +
+  facet_wrap(~model, ncol = 1)
+```
+## Extent vs. SST
+
+```{r}
+extents[model %in% c("access", "hadisst") & variable == "extent"] |> 
+  dcast(time + model ~ variable, value.var = "value") |> 
+  _[model != "access", model := "era5"] |> 
+  _[sst, on = .NATURAL] |> 
+  melt(id.vars = c("time", "model")) |> 
+  _[, value := scale(value, scale = sd(value[year(time) %between% c(1981, 2011)])), by = .(model, variable)] |> 
+  _[variable == "sst", value := -value] |> 
+  _[model != "access", model := "observations (ERA5 + HadISST)"] |> 
+  dcast(time + model ~ variable, value.var = "value") |> 
+  _[!is.na(extent), extent_sst := predict(lm(extent ~ sst)), by = model] |> 
+  _[, residual := extent - extent_sst] |>
+  _[, sst := NULL] |> 
+  melt(id.vars = c("time", "model")) |> 
+  ggplot(aes(time, value)) +
+  geom_line(aes(color = variable)) +
+  scale_y_continuous() +
+  scale_x_date(NULL) +
+  facet_wrap(~model, ncol = 1)
+```
+
+
+# Forecast
+
+## Skill vs persistence
+
+> The persistence skill which is calculated with the HadISST data are often used to a reference for model prediction skills. 
+> The persistence correlation is the autocorrelation of the initial conditions for forecasts at different months lead and the persistence RMSE is the standard deviation of the difference between the initial condition and true future state. 
+Persistence -> not the error or forecasting persistence‽ Is how well a persistencce model forecast itself. 
+
+
+```{r}
+read_digitised <- function(month, measure) {
+  file <- file.path(data, "digitised", paste0(month, "_", measure, ".csv"))
+  d <- fread(file) 
+  
+  colnames(d)<- c("lead", 
+                  vapply(strsplit(colnames(d)[2:3], "_"), \(x) x[[3]], FUN.VALUE = character(1)))
+  setcolorder(d, c("lead", "forecast", "persistence"))
+  d
+}
+
+
+digitised <- CJ(month = c("02", "05", "08", "11"),
+                measure = c("cor", "rmse")) |> 
+  _[, read_digitised(month, measure), by = .(month, measure)] |> 
+  _[, month := as.numeric(month)] |> 
+  _[measure == "cor", measure := "correlation"]
+```
+
+
+```{r}
 read_correlations <- function(files) {  
   dates <- utils::strcapture("mi_aice_(\\d{8})_e(\\d{2})_(\\w+).nc", basename(files),
                              proto = list(time_forecast = character(),
@@ -255,81 +369,172 @@ geom_cross <- function() {
 }
 ```
 
+
 ```{r}
 cors <- read_correlations(list.files(file.path(data, "correlations"), full.names = TRUE)) |> 
   _[, measure := "correlation"] |> 
   tidyfast::dt_pivot_wider(names_from = type, values_from = value) |> 
-  _[, let(skill = (forecast - persistence)/(1 - persistence))] 
-
+  _[, let(skill = (forecast - persistence)/(1 - persistence))] |> 
+  _[time != time[1]]
 
 rmse <- read_correlations(list.files(file.path(data, "rmse"), full.names = TRUE)) |> 
   _[, measure := "rmse"] |> 
   _[value < 0.01, value := NA] |>    # A few forecast have very low values
   tidyfast::dt_pivot_wider(names_from = type, values_from = value) |> 
-  _[, let(skill = (forecast - persistence)/(0 - persistence))] 
-
+  _[, let(skill = (forecast - persistence)/(0 - persistence))] |> 
+  _[time != time[1]]
 ```
 
 ```{r}
 skill <- rbind(cors, rmse) |> 
-  _[, let(persistence = NULL)]
-
-initial <- skill[time == time_forecast, .(time_forecast, member, measure, initial = forecast)]
-
-skill <- skill[time != time_forecast] |> 
-  _[initial, on = c("time_forecast", "member", "measure")] |> 
   _[, let(lead = months_difference(time_forecast, time),
           verification_season = season(time),
           forecast_season = season(time_forecast))] 
+
+scale_color_forecasts <- scale_color_manual(NULL, values = c("persistence" = "black",
+                                                             "forecast" = "#fc8383"),
+                                            labels = c("persistence" = "Persistence",
+                                                       "forecast" = "Forecast"))
+
+scale_x_lead <- scale_x_continuous(NULL, breaks = 0:8, minor_breaks = NULL) 
 ```
 
+## Comparison w/ BOM report
+
+```{r}
+digitised |> 
+  melt(id.vars = c("month", "measure", "lead")) |> 
+  ggplot(aes(lead, value)) +
+  geom_line(aes(color = variable)) +
+  geom_text(data = \(x) x[variable == "forecast"][, .SD[1], by = .(month, lead, measure)],
+            aes(y = 0, label = month.abb[(month + lead - 1) %% 12 + 1]),
+            size = 3, angle = 90, hjust = -0.1) +
+  scale_x_lead +
+  scale_y_continuous(NULL) +
+  scale_color_forecasts + 
+  facet_grid(month ~ measure, labeller = labeller(month = setNames(month.abb, 1:12),
+                                                  measure = c(correlation = "Correlation",
+                                                              rmse = "RMSE")))  +
+  labs(title = "BOM") +
+  
+  
+  rbind(cors, rmse) |> 
+  _[month(time_forecast) %in% c(02, 05, 08, 11)] |>
+  melt(id.vars = c("time", "time_forecast", "member", "measure"),
+       measure.vars = c("forecast", "persistence")) |> 
+  _[, lead := months_difference(time_forecast, time)] |> 
+  # _[measure == "rmse"] |> 
+  _[, month := month(time_forecast)] |> 
+  
+  _[lead <= 6] |>
+  _[, .(value = mean(value, na.rm = TRUE)),
+    by = .(lead, month(time_forecast), measure, variable)] |> 
+  ggplot(aes(lead, value)) +
+  geom_line(aes(color = variable)) +
+  geom_text(data = \(x) x[variable == "forecast"][, .SD[1], by = .(month, lead, measure)],
+            aes(y = 0, label = month.abb[(month + lead - 1) %% 12 + 1]),
+            size = 3, angle = 90, hjust = -0.1) +
+  scale_x_lead +
+  scale_y_continuous(NULL) +
+  scale_color_forecasts + 
+  facet_grid(month ~ measure, labeller = labeller(month = setNames(month.abb, 1:12),
+                                                  measure = c(correlation = "Correlation",
+                                                              rmse = "RMSE")))  +
+  labs(title = "Me")
+```
+
+----
 
 ```{r}
 rbind(cors, rmse) |> 
-  _[month(time_forecast) %in% c(02, 05, 08, 11)] |> 
+  # _[month(time_forecast) %in% c(02, 05, 08, 11)] |>
+  melt(id.vars = c("time", "time_forecast", "member", "measure"),
+       measure.vars = c("forecast", "persistence")) |> 
+  _[, lead := months_difference(time_forecast, time)] |> 
+  _[measure == "correlation"] |> 
+  _[, month := month(time_forecast)] |> 
+  # _[lead <= 6] |>
+  # _[, .(value = mean(value, na.rm = TRUE)),
+  #   by = .(lead, month(time_forecast), measure, variable)] |>
+  ggplot(aes(lead, value)) +
+  geom_hline(yintercept = 0, linetype = 3) +
+  geom_boxplot(aes(color = variable, group = interaction(variable, lead))) +
+  geom_text(data = \(x) x[variable == "forecast"][, .SD[1], by = .(month, lead)],
+            aes(y = -0.5, label = month.abb[(month + lead - 1) %% 12 + 1]),
+            size = 3, angle = 90, hjust = 0) +
+  scale_color_forecasts +
+  scale_x_lead +
+  facet_wrap(month ~ ., labeller = labeller(month = setNames(month.abb, 1:12))) +
+  labs(title = "Correlation - Higher is better")
+```
+
+----
+
+```{r}
+rbind(cors, rmse) |> 
+  # _[month(time_forecast) %in% c(02, 05, 08, 11)] |>
   melt(id.vars = c("time", "time_forecast", "member", "measure"),
        measure.vars = c("forecast", "persistence")) |> 
   _[, lead := months_difference(time_forecast, time)] |> 
   _[measure == "rmse"] |> 
-  _[lead <= 6] |> 
-  _[, .(value = mean(value, na.rm = TRUE)), 
-    by = .(lead, month(time_forecast), measure, variable)] |> 
+  _[, month := month(time_forecast)] |> 
+  # _[lead <= 6] |>
+  # _[, .(value = mean(value, na.rm = TRUE)),
+  #   by = .(lead, month(time_forecast), measure, variable)] |>
   ggplot(aes(lead, value)) +
-  geom_line(aes(color = variable)) +
-  facet_grid(month ~ measure)
+  geom_hline(yintercept = 0, linetype = 3) +
+  geom_boxplot(aes(color = variable, group = interaction(variable, lead))) +
+  geom_text(data = \(x) x[variable == "forecast"][, .SD[1], by = .(month, lead)],
+            aes(y = 0, label = month.abb[(month + lead - 1) %% 12 + 1]),
+            size = 3, angle = 90, hjust = 0) +
+  scale_color_forecasts +
+  scale_x_lead +
+  facet_wrap(month ~ ., labeller = labeller(month = setNames(month.abb, 1:12))) +
+  labs(title = "RMSE - Lower is better")
 ```
 
+## Model Skill
 
 ```{r}
 skill |> 
   _[measure == "rmse"] |> 
-  ggplot(aes(skill)) +
-  geom_density(aes(color = factor(lead))) +
-  facet_wrap(lubridate::month(time, label = TRUE)~.)
+  _[!is.na(skill)] |> 
+  _[, month := month(time_forecast)] |> 
+  # _[, .SD[1], by = .(month, lead)]
+  ggplot(aes(lead, skill)) +
+  geom_hline(yintercept = 0, linetype = 3) +
+  geom_boxplot(aes(group = lead)) +
+  geom_text(data = \(x) x[, .SD[1], by = .(month, lead)],
+            aes(y = -0.8, label = month.abb[(month + lead - 1) %% 12 + 1]),
+            size = 2, angle = 90, hjust = 0) +
+  scale_x_lead +
+  scale_y_continuous("RMSE skill") +
+  facet_wrap(month~., labeller = labeller(month = setNames(month.abb, 1:12)))
 ```
 
-
-
+## Model Skill
 
 ```{r}
 skill |> 
-  _[measure == "rmse"] |> 
-  na.omit() |> 
-  ggplot(aes(initial, forecast)) +
-  
-  geom_point(size = 0.4) +
-  geom_smooth(method = "lm", color = "#1c71d8", se = FALSE) +
-  # geom_line(data = lines, linewidth = 0.9, color = "#e66100") +
-  scale_x_continuous("Initial conditions") +
-  scale_y_continuous("Forecast") +
-  facet_wrap(~ lead, ncol = 4) +
-  labs(title = "RMSE")
-
-
-last_plot() %+% skill[measure == "correlation"] + 
-  labs(title = "Correlation") +
-  geom_cross()
+  _[measure == "correlation"] |> 
+  _[!is.na(skill)] |> 
+  _[, month := month(time_forecast)] |> 
+  # _[, .SD[1], by = .(month, lead)]
+  ggplot(aes(lead, skill)) +
+  geom_hline(yintercept = 0, linetype = 3) +
+  geom_boxplot(aes(group = lead)) +
+  geom_text(data = \(x) x[, .SD[1], by = .(month, lead)],
+            aes(y = -0.8, label = month.abb[(month + lead - 1) %% 12 + 1]),
+            size = 2, angle = 90, hjust = 0) +
+  scale_x_lead +
+  scale_y_continuous("Correlation skill") +
+  facet_wrap(month~., labeller = labeller(month = setNames(month.abb, 1:12)))
 ```
+
+```{r}
+knitr::knit_exit()
+```
+
 
 ## Initial conditions vs forecast
 
@@ -341,21 +546,22 @@ skill |>
   
   geom_point(size = 0.4) +
   geom_smooth(method = "lm", color = "#1c71d8", se = FALSE) +
-  # geom_line(data = lines, linewidth = 0.9, color = "#e66100") +
+  # geom_line(data = lines, li
   scale_x_continuous("Initial conditions") +
   scale_y_continuous("Forecast") +
-  facet_grid(forecast_season ~ lead) +
+  facet_grid(verification_season ~ lead) +
   labs(title = "RMSE", 
-       subtitle = "As a function of forecast season")
+       subtitle = "As a function of verification season")
+```
 
 
+```{r}
 last_plot() %+% skill[measure == "correlation"] + 
   labs(title = "Correlation") +
   geom_cross()
 ```
 
 ## Initial conditions vs forecast
-
 
 ```{r}
 skill |> 
@@ -380,7 +586,7 @@ last_plot() %+% skill[measure == "correlation"] +
 
 ```{r}
 skill |> 
-  _[measure == "correlation"] |> 
+  _[measure == "rmse"] |> 
   na.omit() |> 
   ggplot(aes(initial, skill)) +
   geom_point(size = 0.4) +
@@ -394,10 +600,9 @@ skill |>
 
 
 last_plot() %+% skill[measure == "correlation"] + 
-  labs(title = "Correlation") +
+  labs(title = "Correlation skill compared with persistence") +
   geom_cross()
 ```
-
 
 ```{r}
 model <- cors[time != time_forecast] |> 
