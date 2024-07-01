@@ -16,6 +16,10 @@ access_susbet_data=$data_derived/access_subset.nc
 access_climatology=$data_derived/access_climatology.nc
 access_anomaly=$data_derived/access_anomaly.nc
 
+access_sst=$data_derived/access_sst.nc
+
+era5_sst=$data_derived/era5_sst.nc
+
 access_climatology_daily=$data_derived/access_climatology_daily.nc
 
 nsidc_extent=$data_derived/nsidc_extent.nc
