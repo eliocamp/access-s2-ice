@@ -248,57 +248,89 @@ sst <- rbind(file.path(data, "access_sst.nc") |>
 
 sst[, sst := Anomaly(sst, year(time) %between% c(1981, 2011)), by = .(model, month(time))]
 
-
-extents[model %in% c("access", "hadisst") & variable == "extent"] |> 
+ice_sst <- extents[model %in% c("access", "hadisst") & variable == "extent"] |> 
   dcast(time + model ~ variable, value.var = "value") |> 
   _[model != "access", model := "era5"] |> 
   _[sst, on = .NATURAL] |> 
   melt(id.vars = c("time", "model")) |> 
   _[, value := scale(value, scale = sd(value[year(time) %between% c(1981, 2011)])), by = .(model, variable)] |> 
+  # _[variable == "sst", value := -value] |> 
+  _[model != "access", model := "observations (ERA5 + HadISST)"]
+```
+
+
+```{r}
+ice_sst |> 
+  copy() |> 
   _[variable == "sst", value := -value] |> 
-  _[model != "access", model := "observations (ERA5 + HadISST)"] |> 
   ggplot(aes(time, value)) +
   geom_line(aes(color = variable)) +
   scale_y_continuous("Scaled value (sst reversed)") +
   scale_x_date(NULL) +
   facet_wrap(~model, ncol = 1)
-  
 ```
 
 ## Extent vs. SST
 
 ```{r}
-
-extents[model %in% c("access", "hadisst") & variable == "extent"] |> 
+ice_sst |> 
   dcast(time + model ~ variable, value.var = "value") |> 
-  _[model != "access", model := "era5"] |> 
-  _[sst, on = .NATURAL] |> 
-  melt(id.vars = c("time", "model")) |> 
-  _[, value := scale(value, scale = sd(value[year(time) %between% c(1981, 2011)])), by = .(model, variable)] |> 
-  _[variable == "sst", value := -value] |> 
-  _[model != "access", model := "observations (ERA5 + HadISST)"] |> 
-  dcast(time + model ~ variable, value.var = "value") |> 
+  # _[, month := month(time)] |> 
   ggplot(aes(extent, sst)) +
-  geom_point() +
+  geom_point(size = 0.5) +
   geom_smooth(method = "lm")  +
-  geom_text(data = \(x) x[, cor(extent, sst, use = "complete.obs"), by = model],
-            aes(label = scales::number(V1, prefix = "r=")), 
-            x = 3, y = -4) +
-  facet_wrap(~model, ncol = 1)
+  geom_text(data = \(x) x[, cor(extent, sst, use = "complete.obs"), 
+                          by = .(model)],
+            aes(label = scales::number(V1, accuracy = 0.01, prefix = "r=")), 
+            x = 3, y = 4) +
+  facet_grid(model ~ .)
 ```
+
 ## Extent vs. SST
 
 ```{r}
-extents[model %in% c("access", "hadisst") & variable == "extent"] |> 
+ice_sst |> 
   dcast(time + model ~ variable, value.var = "value") |> 
-  _[model != "access", model := "era5"] |> 
-  _[sst, on = .NATURAL] |> 
-  melt(id.vars = c("time", "model")) |> 
-  _[, value := scale(value, scale = sd(value[year(time) %between% c(1981, 2011)])), by = .(model, variable)] |> 
-  _[variable == "sst", value := -value] |> 
-  _[model != "access", model := "observations (ERA5 + HadISST)"] |> 
+  _[, with(cor.test(extent, sst, use = "complete.obs"),
+           list(estimate = estimate,
+                low = conf.int[1],
+                high = conf.int[2])),
+    by = .(month = lubridate::month(time, label = TRUE), model)] |> 
+  ggplot(aes(month, estimate)) +
+  geom_hline(yintercept = 0, linetype = 3) +
+  geom_ribbon(aes(group = model, fill = model, ymin = low, ymax = high), 
+              alpha = 0.4) +
+  geom_line(aes(group = model, color = model)) +
+  geom_point(aes(group = model, color = model)) +
+  scale_y_continuous("SST-Extent correlation") +
+  scale_x_discrete(NULL)
+```
+
+## Extent vs. SST
+
+
+```{r}
+ice_sst |> 
   dcast(time + model ~ variable, value.var = "value") |> 
-  _[!is.na(extent), extent_sst := predict(lm(extent ~ sst)), by = model] |> 
+  _[order(time)] |>
+  _[, cor := roll::roll_cor(extent, sst, width = 11*12) |> 
+      shift(-11*12), by = .(model)] |> 
+  na.omit() |> 
+  ggplot(aes(time, cor)) +
+  geom_hline(yintercept = 0, linetype = 3) +
+  geom_line(aes(color = model)) +
+  scale_y_continuous("SST-Extent correlation") +
+  scale_x_date(NULL, date_breaks = "5 years", date_labels = "%Y")
+```
+
+
+## Extent vs. SST
+
+```{r}
+ice_sst |> 
+  dcast(time + model ~ variable, value.var = "value") |> 
+  _[!is.na(extent), extent_sst := predict(lm(extent ~ sst)), 
+    by = .(month(time), model)] |> 
   _[, residual := extent - extent_sst] |>
   _[, sst := NULL] |> 
   melt(id.vars = c("time", "model")) |> 
@@ -437,9 +469,10 @@ digitised |>
   scale_x_lead +
   scale_y_continuous(NULL) +
   scale_color_forecasts + 
-  facet_grid(month ~ measure, labeller = labeller(month = setNames(month.abb, 1:12),
-                                                  measure = c(correlation = "Correlation",
-                                                              rmse = "RMSE")))  +
+  facet_grid(month ~ measure, scales = "free",
+             labeller = labeller(month = setNames(month.abb, 1:12),
+                                 measure = c(correlation = "Correlation",
+                                             rmse = "RMSE")))  +
   labs(title = "Me")
 ```
 
