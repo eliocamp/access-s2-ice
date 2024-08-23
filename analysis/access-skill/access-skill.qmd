@@ -14,6 +14,8 @@ library(ggplot2)
 library(data.table)
 library(patchwork)
 library(rcdo)
+library(ncdf4)
+library(PCICt)
 theme_set(theme_minimal() + theme(legend.position = "bottom"))
 
 
@@ -238,7 +240,7 @@ a |>
 a[, as.numeric(init_time - min(time))/3600/24, by = .(region, init_time, member)][V1 != -1]
 ```
 
-# HINDCAST
+# Reanalysis
 
 ```{r read_data}
 
@@ -280,6 +282,244 @@ nsidc <- read_extent(file.path(data, "nsidc_extent.nc"),
 
 ```
 
+```{r}
+
+correlate <- function(x, y, ...) {
+  cor <- cor.test(x, y, ...)
+  list(estimate = cor[["estimate"]],
+       low = cor[["conf.int"]][[1]],
+       hig = cor[["conf.int"]][[2]])
+  
+}
+
+rbind(hadisst = hadisst, 
+      access = access, 
+      idcol = "model") |> 
+  copy() |> 
+  _[variable == "extent"] |> 
+  _[order(time)] |> 
+  _[, c(as.character(seq(0, 20))) := shift(value, 0:-20), by = .(model)] |> 
+  tidyfast::dt_pivot_longer(`0`:`20`) |> 
+  _[, correlate(value, value.1, use = "complete.obs"), 
+    by = .(model, 
+           name = as.numeric(name),
+           month(time))] |> 
+  ggplot(aes(name, estimate)) +
+  geom_ribbon(aes(ymin = low, ymax = hig, 
+                  color = model, 
+                  fill = model), alpha = 0.1) +
+  geom_line(aes(color = model)) +
+  geom_hline(yintercept = 1/exp(1)) +
+  facet_wrap(~ month)
+
+```
+```{r}
+
+to_month <- function(x) {
+  c(month.abb[[12]], month.abb)[(x %% 12)+1]
+}
+
+mean_extent <- access[variable == "extent", .(extent = mean(value, na.rm = TRUE)), by = month(time)]
+
+rbind(hadisst = hadisst, 
+      access = access, 
+      idcol = "model") |> 
+  copy() |> 
+  _[variable == "extent"] |> 
+  _[order(time)] |> 
+  _[, value := value - mean(value, na.rm = TRUE), 
+    by = .(variable, model, month(time))] |> 
+  _[, c(as.character(seq(0, 20))) := shift(value, 0:-20), by = .(variable, model)] |> 
+  tidyfast::dt_pivot_longer(`0`:`20`) |> 
+  _[, correlate(value, value.1, use = "complete.obs"), 
+    by = .(variable, model, 
+           name = as.numeric(name),
+           month(time))] |> 
+  # _[variable == "extent"] |> 
+  # ggperiodic::qwrap(month = 1:13 ~ 1:13) |>
+  ggplot(aes(month, name)) +
+  geom_contour_fill(aes(z = estimate, fill = after_stat(level)))  +
+  # geom_raster(aes(fill = estimate)) +
+  # geom_vline(xintercept = c(1, 13)) +
+  geom_contour2(aes(z = estimate, label = "1/e"), breaks = c(1/exp(1))) +
+  # geom_line(data = mean_extent, aes(y = scales::rescale(extent, to = c(5, 10)))) +
+  scale_fill_divergent(NULL, midpoint = 1/exp(1),
+                       guide = guide_colorsteps(even.steps = FALSE,
+                         theme = theme(legend.key.width = grid::unit(1, "null"))
+                       ),
+                       super = metR::ScaleDiscretised) +
+  scale_x_continuous(NULL, breaks = 1:15, labels = to_month, 
+                     expand = c(0, 0)) +
+  scale_y_continuous("Lag", expand = c(0, 0)) + 
+  facet_wrap(~model, ncol = 1) +
+  coord_flip() 
+```
+
+```{r}
+
+rbind(hadisst = hadisst, 
+      access = access, 
+      idcol = "model") |> 
+  copy() |> 
+  _[variable == "extent"] |> 
+  _[order(time)] |> 
+  _[, value := value - mean(value, na.rm = TRUE), 
+    by = .(variable, model, month(time))] |> 
+  _[, c(as.character(seq(0, 20))) := shift(value, 0:-20), by = .(variable, model)] |> 
+  tidyfast::dt_pivot_longer(`0`:`20`) |> 
+  _[, correlate(value, value.1, use = "complete.obs"), 
+    by = .(variable, model, 
+           name = as.numeric(name),
+           month(time))] |> 
+  _[, estimate := estimate - mean(estimate), by = .(variable, model, name)] |> 
+  # _[variable == "extent"] |> 
+  # ggperiodic::qwrap(month = 1:13 ~ 1:13) |>
+  ggplot(aes(month, name)) +
+  geom_contour_fill(aes(z = estimate, fill = after_stat(level)))  +
+  # geom_raster(aes(fill = estimate)) +
+  # geom_vline(xintercept = c(1, 13)) +
+  # geom_contour2(aes(z = estimate, label = "1/e"), breaks = c(1/exp(1))) +
+  # geom_line(data = mean_extent, aes(y = scales::rescale(extent, to = c(5, 10)))) +
+  scale_fill_divergent(NULL, 
+                       guide = guide_colorsteps(even.steps = FALSE,
+                         theme = theme(legend.key.width = grid::unit(1, "null"))
+                       ),
+                       super = metR::ScaleDiscretised) +
+  scale_x_continuous(NULL, breaks = 1:15, labels = to_month, 
+                     expand = c(0, 0)) +
+  scale_y_continuous("Lag", expand = c(0, 0)) + 
+  facet_wrap(~model, ncol = 1) +
+  coord_flip() 
+```
+
+
+```{r}
+access |> 
+  copy() |> 
+  _[, c(as.character(seq(0, 20))) := shift(value, 0:-20), by = .(variable)] |> 
+  tidyfast::dt_pivot_longer(`0`:`20`) |> 
+  _[, correlate(value, value.1, use = "complete.obs"), 
+    by = .(variable, name = as.numeric(name),                                                        month(time))] |> 
+  _[variable == "extent"] |> 
+  # _[, estimate := estimate - mean(estimate), by = name] |> 
+  ggperiodic::qwrap(month = 1:13 ~ 3:15) |>
+  ggplot(aes(month, month + name)) +
+  # geom_tile(aes(fill = estimate)) +
+  geom_contour_fill(aes(z = estimate, fill = after_stat(level)))  +
+  geom_contour2(aes(z = estimate, label = "1/e"), breaks = c(1/exp(1))) +
+  # geom_line(data = mean_extent, aes(y = scales::rescale(extent, to = c(5, 10)))) +
+  scale_fill_divergent(NULL, midpoint = 1/exp(1),
+                       guide = guide_colorsteps(even.steps = FALSE,
+                         theme = theme(legend.key.width = grid::unit(1, "null"))
+                       ),
+                       super = metR::ScaleDiscretised
+                       ) +
+  scale_x_continuous("Month", breaks = 3:15, 
+                     minor_breaks = NULL, 
+                     labels = to_month, 
+                     transform = scales::reverse_trans(),
+                     expand = c(0, 0)) +
+  scale_y_continuous("Month2", expand = c(0, 0), 
+                     minor_breaks = NULL,
+                     breaks = 0:(13 + 20),
+                     labels = to_month) +
+  coord_flip() +
+  
+mean_extent |> 
+    ggperiodic::qwrap(month = 1:13 ~ 3:15) |>
+  ggplot(aes(month, extent)) +
+  geom_line() +
+  coord_flip() +
+  scale_x_continuous(NULL, breaks = 3:15, 
+                     minor_breaks = NULL, 
+                     labels = NULL, 
+                     transform = scales::reverse_trans(),
+                     expand = c(0, 0)) +
+  plot_layout(widths = c(5, 1))
+  
+```
+
+```{r}
+mean_extent |> 
+  ggplot(aes(month, extent)) +
+  geom_line()
+
+mean_extent |> 
+  copy() |> 
+  _[, extent := scales::rescale(extent, to = c(-1, 1))] |> 
+  ggplot(aes(month, extent)) +
+  geom_line()
+
+mean_extent |> 
+  copy() |> 
+  _[, extent := scales::rescale(extent, to = c(-1, 1))] |> 
+  _[, month2 := acos(extent)] |> 
+  ggplot(aes(extent, month)) +
+  geom_path() +
+  geom_point() +
+  scale_y_continuous(breaks = 1:12)
+
+
+mean_extent |> 
+  copy() |> 
+  _[, extent := scales::rescale(extent, to = c(-1, 1))] |> 
+  _[, month_cos := acos(extent)]
+
+
+```
+
+```{r}
+
+
+
+hadisst |> 
+  copy() |> 
+  _[variable == "extent"] |> 
+    _[, value := value - mean(value, na.rm = TRUE), 
+    by = .(variable,  month(time))] |> 
+  _[, c(as.character(seq(0, 20))) := shift(value, 0:-20), by = .(variable)] |> 
+  tidyfast::dt_pivot_longer(`0`:`20`) |> 
+  _[, correlate(value, value.1, use = "complete.obs"), 
+    by = .(variable, name = as.numeric(name), month(time))] |> 
+  # _[, estimate := estimate - mean(estimate), by = name] |> 
+  _[, month2 := month + name] |> 
+  _[, .(month, month2, estimate, name)] |> 
+  _[, month2 := (month2 - 1) %% 12 + 1] |> 
+  _[month2 > month ] |>
+  _[name < 6] |> 
+  _[mean_extent, on = c("month")] |> 
+  _[mean_extent, on = c(month2 = "month")] |> 
+  # _[, summary(lm(estimate ~ I(abs(extent - i.extent))))]
+  ggplot(aes(abs(extent - i.extent), estimate)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  facet_wrap(~name)
+```
+
+
+```{r}
+acfdf <- function(...) {
+  raw <- acf(..., plot = FALSE)
+  list(lag = raw[["lag"]][, 1,1],
+       acf = raw[["acf"]][, 1, 1]
+  )
+}
+
+rbind(access = access, hadisst = hadisst, idcol = "model") |>
+  na.omit() |>
+  _[variable == "extent"] |> 
+  # _[year(time) < 2014] |>
+  _[, value := Anomaly(value), 
+    by = .(model, month(time))] |>
+  # _[, value := resid(lm(value ~ poly(time, 5))), .(model)] |> 
+  _[season(time) == "DJF"] |> 
+  _[, acfdf(value, na.action = na.omit), by = .(model)] |>
+  ggplot(aes(lag, acf)) +
+  geom_line(aes(color = model)) +
+  expand_limits(y = 0) 
+facet_wrap(~model)
+```
+
 ## Antarctic Sea Ice Extent/Area
 
 ```{r}
@@ -311,6 +551,7 @@ extents |>
               n = 100
   ) +
   
+  # geom_smooth(method = "lm", formula = y ~poly(x, 4), aes(color = model)) +
   scale_y_continuous("Extent/area (million km²)",
                      labels = scales::label_number(scale = 1e-12)) +
   scale_x_date(NULL, expand = c(0, 0)) +
@@ -345,6 +586,7 @@ extents |>
 ```
 
 
+<<<<<<< Updated upstream
 
 ```{r}
 mean_access <- access_data |> 
@@ -360,6 +602,8 @@ ReadNetCDF(mean_access, vars = "aice",
 
 ```
 
+=======
+>>>>>>> Stashed changes
 ## Spatial correlation of anomalies
 
 ```{r}
@@ -551,7 +795,7 @@ ice_sst |>
 ```
 
 
-# Forecast
+# Hindcast
 
 ## Skill vs persistence
 
