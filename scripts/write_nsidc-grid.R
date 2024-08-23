@@ -1,7 +1,7 @@
 proj <- "+proj=stere +lat_0=-90 +lat_ts=-70 +lon_0=0 +k=1 +x_0=0 +y_0=0 +a=6378273 +b=6356889.449 +units=m"
 r <- 25000
   
-grid <- "data/data_derived/nsidc_climatology.nc" |> 
+grid <- "data/derived/nsidc_climatology.nc" |> 
   metR::ReadNetCDF(vars = c(ice = "cdr_seaice_conc_monthly")) |> 
   _[time == time[1], .(ygrid, xgrid)]
 
@@ -29,4 +29,4 @@ data <- list(
 
 data2 <- vapply(data, paste0, collapse = " ", FUN.VALUE = character(1))
 
-writeLines(paste0(names(data), " = ", data2), "data/data_derived/nsidc_grid.txt")
+writeLines(paste0(names(data), " = ", data2), "data/derived/nsidc_grid.txt")

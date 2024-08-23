@@ -1,4 +1,5 @@
-source scripts/variables.bash
+set -u
+source scripts/setup/variables.bash
 access_reanalysis_dir_sst=/g/data/ux62/access-s2/reanalysis/ocean/sst/
 
 

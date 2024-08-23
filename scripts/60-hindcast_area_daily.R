@@ -22,8 +22,8 @@ antarctic_regions <- list(
 )
 
 cdo_remap_nsidc <- function(file) {
-    land_mask <- "data/data_derived/land_mask.nc"
-    nsidc <- "data/data_raw/nsidc_grid.txt"
+    land_mask <- "data/derived/land_mask.nc"
+    nsidc <- "data/raw/nsidc_grid.txt"
     file |>
         cdo_remapbil(nsidc) |>
         cdo_mul(land_mask)
@@ -36,14 +36,14 @@ cdo_area <- function(file) {
 }
 
 cdo_seaice_area <- function(file) {
-    outputs <- file.path("data", "data_derived", "hindcast_area", "daily", names(antarctic_regions), basename(file))
+    outputs <- file.path("data", "derived", "hindcast_area", "daily", names(antarctic_regions), basename(file))
 
     if (all(file.exists(outputs))) {
         return("done")
     }
     message("Processing ", basename(file))
     for (region in names(antarctic_regions)) {
-        output <- file.path("data", "data_derived", "hindcast_area", "daily", region, basename(file))
+        output <- file.path("data", "derived", "hindcast_area", "daily", region, basename(file))
         dir.create(dirname(output), recursive = TRUE, showWarnings = FALSE)
         if (file.exists(output)) {
             next
@@ -52,7 +52,7 @@ cdo_seaice_area <- function(file) {
         r <- strsplit(antarctic_regions[[region]], ",")[[1]]
 
         file_region <- cdo_selname(file, "aice") |>
-            cdo_set_options("L") |>
+            cdo_options_use("L") |>
             cdo_sellonlatbox(0, 360, -90, -47) |>
             cdo_sellonlatbox(
                 lon1 = r[1], lon2 = r[2],
@@ -62,7 +62,7 @@ cdo_seaice_area <- function(file) {
             cdo_execute()
         
         cdo_area(file_region) |>
-            cdo_set_options("L") |>
+            cdo_options_use("L") |>
             cdo_execute(output = output)
         
         file.remove(file_region)

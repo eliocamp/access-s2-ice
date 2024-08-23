@@ -23,13 +23,13 @@ set_day <- function(date) {
   lubridate::day(date) <- 01
   as.Date(date)
 }
-data <- here::here("data/data_derived")
+data <- here::here("data/derived")
 
 months_difference <- function(x, y) {
   lubridate::interval(x, y) %/% months(1)
 }
 
-access_data <- "data/data_derived/access_subset.nc"
+access_data <- "data/derived/access_subset.nc"
 ```
 
 
@@ -98,7 +98,7 @@ rbind(access = access, hadisst = hadisst, idcol = "model") |>
 ```
 
 ```{r}
-hindcast_data <- "data/data_derived/hindcast_area/daily/"
+hindcast_data <- "data/derived/hindcast_area/daily/"
 area_daily <- list.files(hindcast_data, recursive = TRUE)
 
 extract_info <- function(x) {
@@ -124,7 +124,7 @@ a <- lapply(area_daily, function(file) {
 ```
 
 ```{r}
-area_daily <- ReadNetCDF("data/data_derived/access_area_daily.nc", vars = "aice")  |> 
+area_daily <- ReadNetCDF("data/derived/access_area_daily.nc", vars = "aice")  |> 
   _[, let(lon = NULL, lat = NULL)]
 
 

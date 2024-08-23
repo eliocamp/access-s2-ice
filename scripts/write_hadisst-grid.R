@@ -1,4 +1,4 @@
-grid <- "data/data_raw/hadisst.nc" |> 
+grid <- "data/raw/hadisst.nc" |> 
   metR::ReadNetCDF(vars = c(ice = "sic"), 
                    subset = list(time = "2000-01-01")) |> 
   _[time == time[1], .(xgrid = lat, ygrid = lon)]
@@ -26,4 +26,4 @@ data <- list(
 
 data2 <- vapply(data, paste0, collapse = " ", FUN.VALUE = character(1))
 
-writeLines(paste0(names(data), " = ", data2), "data/data_derived/hadisst_grid.txt")
+writeLines(paste0(names(data), " = ", data2), "data/derived/hadisst_grid.txt")

@@ -1,4 +1,4 @@
-# source scripts/variables.bash
+# source scripts/setup/variables.bash
 # # TODO: hacer para diario. 
 
 
@@ -41,15 +41,15 @@
 #                     fi
 
 #                     echo "------ Cutting and remapping ------"
-#                     cdo -L -remapbil,$nsidc_anomaly  -setday,1 -ymonsub -sellonlatbox,0,360,-90,$top_lat -selname,aice $file $access_climatology $temp_access_anom
+#                     cdo -L -remapbil,$nsidc_anomaly_monthly  -setday,1 -ymonsub -sellonlatbox,0,360,-90,$top_lat -selname,aice $file $access_renalysis_climatology_monthly $temp_access_anom
 
 #                     echo "------ Selecting dates in nsidc ------"
 #                     start_date=$(cdo -s showdate $temp_access_anom | awk '{print $1}')
 #                     end_date=$(cdo -s showdate $temp_access_anom | awk '{print $NF}')
-#                     cdo -L -chname,cdr_seaice_conc_monthly,aice -setday,1 -seldate,$start_date,$end_date $nsidc_anomaly $temp_nsidc
+#                     cdo -L -chname,cdr_seaice_conc_monthly,aice -setday,1 -seldate,$start_date,$end_date $nsidc_anomaly_monthly $temp_nsidc
                     
 #                     echo "------ Creating persistence forecast ------"
-#                     cdo -L -seldate,$year-$month-01 $nsidc_anomaly $first_day
+#                     cdo -L -seldate,$year-$month-01 $nsidc_anomaly_monthly $first_day
 #                     cdo -L -mul -expr,"aice=1" $temp_nsidc $first_day $persistence
 #                     break
 #                 fi

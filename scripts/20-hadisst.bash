@@ -1,4 +1,5 @@
-source scripts/variables.bash
+set -u
+source scripts/setup/variables.bash
 
 url=https://www.metoffice.gov.uk/hadobs/hadisst/data/HadISST_ice.nc.gz
 
