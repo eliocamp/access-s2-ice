@@ -27,6 +27,215 @@ months_difference <- function(x, y) {
   lubridate::interval(x, y) %/% months(1)
 }
 
+access_data <- "data/data_derived/access_subset.nc"
+```
+
+
+# Reanalysis
+
+```{r read_data}
+
+read_extent <- function(extent, area, name = "aice", range = NULL) {
+  if (!is.null(range)) {
+    range <- list(time = range)
+  }
+  extent <- ReadNetCDF(extent, vars = c(extent = name),
+                       subset = range)
+  
+  area <- ReadNetCDF(area, vars = c(area = name),
+                     subset = range)
+  
+  extent[area, on = .NATURAL] |>  
+    _[, time := as.Date(time)] |> 
+    _[, let(lat = NULL, lon = NULL)] |> 
+    _[, tidyr::complete(.SD, time = seq(min(time),
+                                        max(time),
+                                        "1 month"))] |> 
+    as.data.table() |> 
+    melt(id.vars = c("time"))
+}
+
+access <- read_extent(file.path(data, "access_extent.nc"), 
+                      file.path(data, "access_area.nc"))
+
+range_access <- range(access$time)
+
+hadisst <- read_extent(file.path(data, "hadisst_extent.nc"), 
+                       file.path(data, "hadisst_area.nc"),
+                       name = "sic",
+                       range = range_access)
+
+
+nsidc <- read_extent(file.path(data, "nsidc_extent.nc"), 
+                     file.path(data, "nsidc_area.nc"),
+                     name = "cdr_seaice_conc_monthly",
+                     range = range_access)
+
+```
+
+```{r}
+acfdf <- function(...) {
+  raw <- acf(..., plot = FALSE)
+  list(lag = raw[["lag"]][, 1,1],
+       acf = raw[["acf"]][, 1, 1]
+       )
+}
+
+rbind(access = access, hadisst = hadisst, idcol = "model") |>
+  na.omit() |>
+  _[variable == "extent"] |> 
+  # _[year(time) < 2014] |>
+  _[, value := Anomaly(value), 
+    by = .(model, month(time), regime = year(time) > 2007)] |>
+  # _[, value := resid(lm(value ~ poly(time, 5))), .(model)] |> 
+  _[, acfdf(value, na.action = na.omit), by = .(regime = year(time) > 2007, model)] |>
+  ggplot(aes(lag, acf)) +
+  geom_line(aes(color = regime)) +
+  expand_limits(y = 0) +
+  facet_wrap(~model)
+```
+
+```{r}
+hindcast_data <- "data/data_derived/hindcast_area/daily/"
+area_daily <- list.files(hindcast_data, recursive = TRUE)
+
+extract_info <- function(x) {
+  utils::strcapture("di_aice_(\\d{8})_e(\\d{2}).nc", 
+                    basename(x), 
+                    proto = list(init_time = character(1), 
+                                member = numeric(1)))
+}
+area_daily <- area_daily[dirname(area_daily) == "Antarctic"]
+
+a <- lapply(area_daily, function(file) {
+  # message(file)
+  ReadNetCDF(file.path(hindcast_data, file), "aice")  |> 
+    _[, file := file] |> 
+    _[, let(lon = NULL, lat = NULL)][]
+}) |> 
+  rbindlist() |> 
+  _[, region := dirname(file)] |> 
+  _[, c("init_time", "member") := extract_info(file)] |> 
+  _[, init_time := lubridate::as_datetime(init_time)] |> 
+  _[, file := NULL]
+
+```
+
+```{r}
+area_daily <- ReadNetCDF("data/data_derived/access_area_daily.nc", vars = "aice")  |> 
+  _[, let(lon = NULL, lat = NULL)]
+
+
+acfdf <- function(...) {
+  raw <- acf(..., plot = FALSE)
+  list(lag = raw[["lag"]][, 1,1],
+       acf = raw[["acf"]][, 1, 1]
+       )
+}
+```
+
+
+```{r}
+area_daily |> 
+  _[year(time) < 2014] |>
+  _[, aice := nafill(aice, type = "locf")] |> 
+  _[, aice_a := Anomaly(aice), 
+    by = .(yday(time))] |>
+  # _[, value := resid(lm(value ~ poly(time, 5))), .(model)] |> 
+  _[, acfdf(aice_a, lag.max = 360*2)] |>
+  ggplot(aes(lag/30, acf)) +
+  geom_line() +
+  expand_limits(y = 0) 
+```
+
+```{r}
+
+rbind(access = access, hadisst = hadisst, idcol = "model") |>
+  na.omit() |>
+  # _[year(time) < 2014] |>
+  _[, value := Anomaly(value), 
+    by = .(variable, model, month(time))] |>
+  # _[, value := resid(lm(value ~ poly(time, 5))), .(model)] |> 
+  _[, acfdf(value, na.action = na.omit), by = .(model, variable)] |>
+  ggplot(aes(lag, acf)) +
+  geom_line(aes(color = variable)) +
+  expand_limits(y = 0) +
+  facet_wrap(~model)
+```
+
+
+```{r}
+a[init_time == unique(init_time)[[2]]] |>
+  ggplot(aes(time, aice)) +
+  geom_line(aes(group = member))
+```
+```{r}
+a |> 
+  copy() |> 
+  _[, lag := (as.numeric(time) - as.numeric(init_time))/3600/24] |> 
+  # _[lag == 30] |> 
+  _[, aice_a := aice - mean(aice), by = .(time, init_time, region)] |> 
+
+  _[, .(sd = sd(aice_a), 
+        mean = mean(aice)), by = .(init_time, region, time, lag)] |> 
+  # _[month(init_time) == 1] |> 
+  _[lag <= 42] |> 
+  ggplot(aes(lag, sd)) +
+  geom_line(aes(group = interaction(init_time), alpha = 0.2)) +
+  geom_smooth() +
+  facet_wrap(~ month(init_time))
+  
+```
+
+```{r}
+a |> 
+  copy() |> 
+  _[, lag := (as.numeric(time) - as.numeric(init_time))/3600/24] |> 
+  # _[lag == 30] |> 
+  _[, aice_a := aice - mean(aice), by = .(time, init_time, region)] |> 
+
+  _[, .(sd = sd(aice_a), 
+        mean = mean(aice)), by = .(month(init_time), region, lag)] |> 
+  # _[month(init_time) == 1] |> 
+  _[lag <= 42] |> 
+  ggplot(aes(lag, sd)) +
+  geom_line(aes(alpha = 0.2)) +
+  # geom_smooth() +
+  facet_wrap(~ month)
+  
+```
+
+```{r}
+a |> 
+  copy() |> 
+  _[, lag := (as.numeric(time) - as.numeric(init_time))/3600/24] |> 
+  _[, aice_a := aice - mean(aice), by = .(time, init_time, region)] |> 
+  _[, .(sd = sd(aice_a), 
+        mean = mean(aice)), by = .(init_time, region, time, lag)] |> 
+  # _[month(init_time) == 1] |> 
+  # _[lag <= 42] |> 
+  ggplot(aes(lag, sd)) +
+  # geom_line(aes(group = interaction(init_time), alpha = 0.2)) +
+  geom_smooth(aes(color = factor(month(init_time)))) +
+  facet_wrap(~ month(init_time))
+```
+
+```{r}
+a |> 
+  copy() |> 
+  _[, lag := (as.numeric(time) - as.numeric(init_time))/3600/24] |> 
+  _[, aice_a := aice - mean(aice), by = .(time, init_time, region)] |> 
+  _[, .(sd = sd(aice_a), 
+        mean = mean(aice)), by = .(init_time, region, time, lag)] |> 
+  # _[month(init_time) == 1] |> 
+  _[lag == 30] |> 
+  ggplot(aes(month(init_time), sd)) +
+  geom_point() +
+  geom_violin(aes(group = month(init_time)))
+```
+
+```{r}
+a[, as.numeric(init_time - min(time))/3600/24, by = .(region, init_time, member)][V1 != -1]
 ```
 
 # HINDCAST
@@ -135,6 +344,22 @@ extents |>
   facet_grid(variable~model)
 ```
 
+
+
+```{r}
+mean_access <- access_data |> 
+   cdo_ymonmean()  |> 
+   cdo_remapbil(grid = "r360x180") |> 
+   cdo_execute(options = "L", verbose = TRUE) 
+   
+ReadNetCDF(mean_access, vars = "aice", 
+           subset = list(lat = c(-90, -47))) |> 
+  ggplot(aes(lon, lat)) +
+  geom_contour_fill(aes(z = aice)) +
+  facet_wrap(~ month(time))
+
+```
+
 ## Spatial correlation of anomalies
 
 ```{r}
@@ -211,23 +436,6 @@ correlation_time |>
   map_antarctica +
   coord_polar() + 
   facet_wrap(~ month, labeller = labeller(month = setNames(month.abb, 1:12))) 
-```
-
-------------------------------------------------------------------------
-
-Why is the correlation so high in the anomalies, but so low in the area?
-
-------------------------------------------------------------------------
-
-It's not really that high.
-
-```{r}
-correlation_time |> 
-  _[correlation != 1] |> 
-  _[, month := lubridate::month(time, label = TRUE, abbr = TRUE)] |> 
-  ggplot(aes(correlation)) +
-  geom_density(aes(weight = cos(lat*pi/180))) +
-  facet_wrap(~month)
 ```
 
 ## Extent vs. SST 
@@ -374,7 +582,7 @@ digitised <- CJ(month = c("02", "05", "08", "11"),
 
 ```{r}
 read_correlations <- function(files) {  
-  dates <- utils::strcapture("mi_aice_(\\d{8})_e(\\d{2})_(\\w+).nc", basename(files),
+  dates <- utils::strcapture("di_aice_(\\d{8})_e(\\d{2})_(\\w+).nc", basename(files),
                              proto = list(time_forecast = character(),
                                           member = character(),
                                           type = character())) |> 
@@ -383,12 +591,22 @@ read_correlations <- function(files) {
     _[]
   
   read <- function(i) {
-    ReadNetCDF(files[[i]], vars = c(value = "aice")) |> 
-      _[, let(lat = NULL, lon = NULL, time = set_day(time))] |> 
+    data <- try(ReadNetCDF(files[[i]], vars = c(value = "aice")), silent = TRUE)
+    
+    if (inherits(data, "try-error")) {
+      file.remove(files[[i]])
+      message("file ", basename(files[[i]]), " deleted")
+      return(NULL)
+    }
+
+
+    data |> 
+      _[, let(lat = NULL, lon = NULL)] |> 
       _[] |> 
       _[, let(time_forecast = dates$time_forecast[[i]],
               member = dates$member[[i]],
-              type = dates$type[[i]])] |> 
+              type = dates$type[[i]],
+              file = files[[i]])] |> 
       _[] 
   }
   
@@ -404,13 +622,10 @@ geom_cross <- function() {
 
 
 ```{r}
-cors <- read_correlations(list.files(file.path(data, "correlations"), full.names = TRUE)) |> 
-  _[, measure := "correlation"] |> 
-  tidyfast::dt_pivot_wider(names_from = type, values_from = value) |> 
-  _[, let(skill = (forecast - persistence)/(1 - persistence))] |> 
-  _[time != time[1]]
+rmse_files <- list.files(file.path(data, "rmse"), pattern = "di_aice_",
+                          full.names = TRUE)
 
-rmse <- read_correlations(list.files(file.path(data, "rmse"), full.names = TRUE)) |> 
+rmse <- read_correlations(rmse_files) |> 
   _[, measure := "rmse"] |> 
   _[value < 0.01, value := NA] |>    # A few forecast have very low values
   tidyfast::dt_pivot_wider(names_from = type, values_from = value) |> 
