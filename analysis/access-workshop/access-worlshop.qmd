@@ -148,3 +148,115 @@ extent |>
     ggplot(aes(lubridate::month(time, label = TRUE), value)) +
     geom_boxplot()
 ```
+
+
+
+
+```{r}
+read_measures <- function(files) {  
+  dates <- utils::strcapture("di_aice_(\\d{8})_e(\\d{2})_(\\w+).nc", basename(files),
+                             proto = list(time_forecast = character(),
+                                          member = character(),
+                                          type = character())) |> 
+    as.data.table() |> 
+    _[, time_forecast := as.Date(time_forecast, format = "%Y%m%d")] |> 
+    _[]
+  
+  read <- function(i) {
+    data <- try(ReadNetCDF(files[[i]], vars = c(value = "aice")), silent = TRUE)
+    
+    if (inherits(data, "try-error")) {
+      file.remove(files[[i]])
+      message("file ", basename(files[[i]]), " deleted")
+      return(NULL)
+    }
+
+    data |> 
+      _[, let(lat = NULL, lon = NULL)] |> 
+      _[] |> 
+      _[, let(time_forecast = dates$time_forecast[[i]],
+              member = dates$member[[i]],
+              type = dates$type[[i]],
+              file = files[[i]])] |> 
+      _[] 
+  }
+  
+  lapply(seq_along(files), read) |> 
+    rbindlist() 
+}
+
+geom_cross <- function() {
+  list(geom_hline(yintercept = 0), 
+       geom_vline(xintercept = 0))
+}
+```
+
+
+```{r}
+rmse_files <- list.files(file.path(globals$data_derived, "rmse"), pattern = "di_aice_",
+                          full.names = TRUE)
+
+dates <- utils::strcapture("di_aice_(\\d{8})_e(\\d{2})_(\\w+).nc", basename(rmse_files),
+                             proto = list(time_forecast = character(),
+                                          member = character(),
+                                          type = character())) |> 
+    as.data.table() |> 
+    _[, time_forecast := as.Date(time_forecast, format = "%Y%m%d")] |> 
+    _[, file := rmse_files]
+
+rmse_files <- dates[type == "forecast" | (type == "persistence" & member == "01")] |> 
+    _[, file]
+
+rmse_rds <- file.path(globals$data_derived, "rmse.Rds")
+if (!file.exists(rmse_rds)) {
+    rmse <- read_measures(rmse_files) |> 
+    _[, measure := "rmse"] 
+
+    saveRDS(rmse, rmse_rds)
+
+} else {
+    rmse <- readRDS(rmse_rds)
+}
+
+
+```
+
+```{r}
+missing_daily <- globals$nsidc_area_daily |> 
+    ReadNetCDF() |> 
+    _[is.na(aice) | aice < 1e6, .(time)]
+```
+
+```{r}
+rmse |> 
+    copy() |> 
+    _[time %in% missing_daily$time, value := NA] |> 
+    _[value < 0.01, value := NA] |> 
+    _[, time := as.Date(time)] |> 
+    _[, lag := as.numeric(time - time_forecast)] |> 
+    ggplot(aes(lag, value)) +
+    geom_line(data = \(x) x[type == "forecast"], 
+              aes(color = type, group = interaction(type, member, time_forecast)), 
+              alpha = 0.01) +
+    geom_line(data = \(x) x[type == "persistence"], 
+              aes(color = type, group = interaction(type, time_forecast)),
+              alpha = 0.1)  +
+    geom_line(data = \(x) x[, .(mean = mean(value, na.rm = TRUE)), by = .(lag, type)] |> 
+              aes(y = mean, color = type), linewidth = 1)
+    
+```
+
+
+```{r}
+rmse |> 
+    copy() |> 
+    _[time %in% missing_daily$time, value := NA] |> 
+    _[value < 0.01, value := NA] |> 
+    _[, time := as.Date(time)] |> 
+    _[, lag := as.numeric(time - time_forecast)] |> 
+    _[, .(mean = mean(value, na.rm = TRUE)), by = .(lag, month(time_forecast), type)]  |> 
+    ggplot(aes(lag, mean)) +
+    geom_line(aes(color = type)) +
+    facet_wrap(~ month)
+
+```
