@@ -1,0 +1,150 @@
+---
+title: "Untitled"
+format: revealjs
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(ggplot2)
+library(data.table)
+library(metR)
+library(rcdo)
+cdo_options_set("-L")
+source("scripts/setup/functions.R")
+```
+
+```{r}
+theme_set(theme_minimal() +
+            theme(panel.background = element_rect(fill = "#fafafa", color = NA),
+                  legend.position = "bottom",
+                  legend.title.position = "top", 
+                  legend.title = element_text(hjust = 0.5),
+                  legend.frame = element_rect(color = "black", linewidth = 0.4),
+                  legend.key.height = unit(0.75, "lines")
+            ))
+wide_legend <- theme(legend.key.width = unit(1, 'null'))
+```
+```{r}
+get <- `$`
+
+sic_projection <- globals$nsidc_climatology_monthly |>  
+  ncdf4::nc_open() |>  
+  ncdf4::ncatt_get(varid = "crs") |> 
+  get("proj_params")
+
+topo <- cdo_topo(grid = globals$nsidc_grid, 
+                 ofile = file.path(globals$data_derived, "topo.nc")) |> 
+    cdo_execute(options = c("-f nc")) |> 
+    ReadNetCDF(c(z = "topo")) |> 
+    _[, .(x = xgrid, y = ygrid, z)]
+
+contour <- StatContour$compute_group(topo, breaks = 0)
+geom_antarctica_path <- geom_path(data = contour, aes(x, y, group = group), inherit.aes = FALSE, colour = "black")
+
+geom_antarctica_fill <- geom_polygon(data = contour, aes(x, y, group = group), inherit.aes = FALSE, colour = "black", fill ="#FAFAFA")
+
+geomcoord_antarctica <- list(NULL
+    , coord_sf(crs = sic_projection, lims_method = "box")
+    , scale_x_continuous(name = NULL, expand = c(0, 0))
+    , scale_y_continuous(name = NULL, expand = c(0, 0))
+    , geom_antarctica_path
+)
+
+scale_color_models <- scale_color_manual(NULL, 
+                     values = c(access = "black", 
+                                hadisst = "#3584e4", 
+                                nsidc = "#e66100"),
+                     labels = c(access = "ACCESS-S2",
+                                hadisst = "HadISST",
+                                nsidc = "NSIDC CDRV4"))
+
+```
+
+```{r}
+climatology <- merge(
+    globals$nsidc_climatology_monthly |> 
+        ReadNetCDF(c(nsidc = "aice")) |> 
+        _[, time := as.Date(time)],
+
+    globals$access_renalysis_climatology_monthly |> 
+        ReadNetCDF(c(access = "aice")) |> 
+        _[, time := as.Date(time)]
+)
+    
+climatology |> 
+    ggplot(aes(xgrid, ygrid)) +
+    geom_contour_fill(aes(z = access - nsidc, fill = after_stat(level)), 
+                      breaks = anchor_limits(binwidth = 0.1, exclude = 0, range = c(-0.5, 0.5))) +
+    scale_fill_divergent_discretised("ACCESS-S2 bias") +
+    geomcoord_antarctica +
+    geom_antarctica_fill +
+    facet_wrap(~ lubridate::month(time, label = TRUE)) +
+    wide_legend
+```
+
+```{r}
+extent <- merge(
+    ReadNetCDF(globals$nsidc_extent_monthly, vars = c(nsidc = "aice")) |> 
+        _[, let(lon = NULL, lat = NULL, time = as.Date(time))] |> 
+        _[, tidyr::complete(.SD, time = seq(min(time),
+                                        max(time),
+                                        "1 month"))],
+    ReadNetCDF(globals$access_extent_monthly, vars = c(access = "aice")) |> 
+        _[, let(lon = NULL, lat = NULL, time = as.Date(time))] |> 
+        _[, tidyr::complete(.SD, time = seq(min(time),
+                                        max(time),
+                                        "1 month"))]
+)  |> 
+    as.data.table()
+
+extent |> 
+    melt(id.vars = "time") |>
+    _[value == 0, value := NA]  |> 
+    _[, value := Anomaly(value, year(time) %between% c(1981, 2011), na.rm = TRUE), 
+        by = .(month(time), variable)] |> 
+    ggplot(aes(time, value)) +
+    geom_line(aes(color = variable)) +
+    geom_smooth(aes(color = variable), method = "lm",
+              formula = y ~ x +
+                I(pmax(x - as.numeric(as.Date("2005-12-01")), 0)) +
+                I(pmax(x - as.numeric(as.Date("2012-12-01")), 0)),
+              n = 100
+    ) +
+    scale_y_continuous("Extent/area (million km²)",
+                     labels = scales::label_number(scale = 1e-12)) +
+    scale_x_date(NULL, expand = c(0, 0)) +
+    scale_color_models
+```
+
+
+```{r}
+extent |> 
+    melt(id.vars = "time") |>
+    _[value == 0, value := NA]  |> 
+    _[, value := Anomaly(value, year(time) %between% c(1981, 2011), na.rm = TRUE), 
+        by = .(month(time), variable)] |> 
+    dcast(time ~ variable, value.var = "value") |> 
+    ggplot(aes(nsidc, access)) +
+  geom_point(size = 0.4) +
+  geom_smooth() +
+  geom_abline() +
+  scale_x_continuous("NSIDC extent (million km²)",
+                     labels = scales::label_number(scale = 1e-12)) +
+  scale_y_continuous("ACCESS extent (million km²)",
+                     labels = scales::label_number(scale = 1e-12)) +
+    # coord_equal() +
+    # facet_wrap(~lubridate::month(time, label = TRUE)) 
+    NULL
+```
+
+
+```{r}
+extent |> 
+    melt(id.vars = "time") |>
+    _[value == 0, value := NA]  |> 
+    _[, value := Anomaly(value, year(time) %between% c(1981, 2011), na.rm = TRUE), 
+        by = .(month(time), variable)]  |> 
+    ggplot(aes(lubridate::month(time, label = TRUE), value)) +
+    geom_boxplot()
+```

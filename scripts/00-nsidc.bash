@@ -22,7 +22,10 @@ mv $temp $nsidc_data_monthly
 
 # Compute NSIDC anomaly
 echo "Computing anomalies"
-cdo -L -ymonsub $nsidc_data_monthly -ymonmean -seldate,1981-01-01,2011-12-31 $nsidc_data_monthly $nsidc_anomaly_monthly & 
+
+cdo -L -ymonmean -seldate,1981-01-01,2011-12-31 $nsidc_data_monthly $nsidc_climatology_monthly &
+
+cdo -L -ymonsub $nsidc_data_monthly $nsidc_climatology_monthly $nsidc_anomaly_monthly & 
 
 mkdir $data_raw/nsidc_daily/
 

@@ -469,9 +469,6 @@ mean_extent |>
 ```
 
 ```{r}
-
-
-
 hadisst |> 
   copy() |> 
   _[variable == "extent"] |> 

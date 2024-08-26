@@ -39,3 +39,42 @@ cdo_iiee <- function(ifile1, ifile2, threshhold = 0.15) {
         rcdo::cdo_ne(file1, file2) |> 
                 rcdo::cdo_fldint() 
 }
+
+
+anchor_limits <- function(anchor = 0, binwidth = NULL, exclude = NULL,  bins = 10,
+                          range = c(NA, NA), sym = TRUE) {
+  force(range)
+  force(anchor)
+  force(binwidth)
+  force(exclude)
+  force(bins)
+  function(x, binwidth2 = NULL) {
+    if (sym) {
+      D <- max(abs(x[1] - anchor), abs(x[2] - anchor))
+      x <- c(anchor - D, anchor + D)
+    }
+    
+    
+    if (!is.null(binwidth)) binwidth2 <- binwidth
+    if (is.null(binwidth2)) {
+      binwidth2 <- diff(pretty(x, bins))[1]
+    }
+    
+    mult <- ceiling((x[1] - anchor)/binwidth2) - 1L
+    start <- anchor + mult*binwidth2
+    b <- seq(start, x[2] + binwidth2, binwidth2)
+    b <- b[!(b %in% exclude)]
+    
+    if (!is.na(range[1])) {
+      m <- min(b)
+      b <- c(b[b >= (range[1] + 1e-9)], -Inf)  # DAMN YOU FLOATING POINT ERRORS!!! 
+    }
+    
+    if (!is.na(range[2])) {
+      m <- max(b)
+      b <- c(b[b <= (range[2] - 1e-9)], Inf)
+    }
+    sort(b)
+    
+  }
+}

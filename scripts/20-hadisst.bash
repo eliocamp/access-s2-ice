@@ -21,6 +21,7 @@ mv $temp $hadisst_data
 
 # Compute anomalies
 echo "Computing anomalies"
-cdo -L ymonsub $hadisst_data -ymonmean -seldate,1981-01-01,2011-12-31 $hadisst_data $hadisst_anomaly
+cdo -L -ymonmean -seldate,1981-01-01,2011-12-31 $hadisst_data $hadisst_climatology
+cdo -L ymonsub $hadisst_data $hadisst_climatology $hadisst_anomaly
 
 

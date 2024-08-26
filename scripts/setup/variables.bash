@@ -12,6 +12,7 @@ nsidc_grid="data/raw/nsidc_grid.txt"
 # NSIDC
 nsidc_data_monthly="${data_raw}/nsidc_data_monthly.nc"
 nsidc_anomaly_monthly="${data_derived}/nsidc_anomaly_monthly.nc"
+nsidc_climatology_monthly="${data_derived}/nsidc_climatology_monthly.nc"
 
 nsidc_daily_data="${data_raw}/nsidc_data_daily.nc"
 nsidc_climatology_daily="${data_derived}/nsidc_climatology_daily.nc"
@@ -20,6 +21,7 @@ nsidc_daily_anomaly="${data_derived}/nsidc_daily_anomaly.nc"
 # HADISST
 hadisst_data="${data_raw}/hadisst_data.nc"
 hadisst_anomaly="${data_derived}/hadisst_anomaly.nc"
+hadisst_climatology="${data_derived}/hadisst_climatology.nc"
 
 # ACCESS Reanalysis
 access_reanalysis_dir="/g/data/ux62/access-s2/reanalysis/ice/aice"
