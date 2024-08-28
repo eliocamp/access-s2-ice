@@ -11,7 +11,7 @@ library(data.table)
 library(metR)
 library(rcdo)
 cdo_options_set("-L")
-source("scripts/setup/functions.R")
+source(here::here("scripts/setup/functions.R"))
 ```
 
 ```{r}
