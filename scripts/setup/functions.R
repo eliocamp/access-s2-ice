@@ -27,7 +27,7 @@ cdo_area<- function(ifile, ofile = NULL) {
         rcdo::cdo(op,  input = list(ifile), params = NULL, output = ofile)
 }
 
-cdo_iiee <- function(ifile1, ifile2, threshhold = 0.15) {
+cdo_iiee <- function(ifile1, ifile2, output, threshhold = 0.15) {
         file1 <- rcdo::cdo_gtc(ifile1, c = threshhold) |> 
                         rcdo::cdo_options_use("-L") |> 
                         rcdo::cdo_execute()
@@ -36,8 +36,12 @@ cdo_iiee <- function(ifile1, ifile2, threshhold = 0.15) {
                         rcdo::cdo_options_use("-L") |> 
                         rcdo::cdo_execute()
 
-        rcdo::cdo_ne(file1, file2) |> 
-                rcdo::cdo_fldint() 
+        out <- rcdo::cdo_ne(file1, file2) |> 
+                rcdo::cdo_fldint()  |> 
+                rcdo::cdo_execute(output = output)
+
+        file.remove(c(file1, file2))
+        return(out)
 }
 
 
