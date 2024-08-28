@@ -83,6 +83,48 @@ climatology |>
     wide_legend
 ```
 
+
+```{r}
+access_sst_clim <- globals$access_sst |> 
+    cdo_ymonmean() |> 
+    cdo_setyear(2000) |> 
+    cdo_execute()
+
+grid <- access_sst_clim |> 
+    ReadNetCDF(c(lon = "nav_lon", lat = "nav_lat"))
+
+era5_sst_clim <- globals$era5_sst |> 
+    cdo_ymonmean() |> 
+    cdo_setyear(2000) |> 
+    cdo_execute()
+
+sst <- merge(
+    access_sst_clim |> 
+        ReadNetCDF(c(access = "sst")) |> 
+        setnames("time_counter", "time") |> 
+        _[, time := as.Date(time)] |> 
+        _[, deptht := NULL],
+    era5_sst_clim |> 
+        ReadNetCDF(c(era5 = "sst")) |> 
+        _[, time := as.Date(time)] |> 
+        _[, era5 := era5 - 273.15]
+)
+
+sst <- merge(grid, sst)
+```
+
+```{r}
+sst |> 
+    copy() |> 
+    _[abs(access - era5) > 5, era5 := NA] |> 
+    ggplot(aes(lon, lat)) +
+    geom_contour_fill(aes(z = access - era5), 
+        proj = sic_projection, proj.latlon = FALSE) +
+    scale_fill_divergent() +
+    geomcoord_antarctica +
+    geom_antarctica_fill +
+    facet_wrap(~month(time))
+```
 ```{r}
 extent <- merge(
     ReadNetCDF(globals$nsidc_extent_monthly, vars = c(nsidc = "aice")) |> 
@@ -153,38 +195,6 @@ extent |>
 
 
 ```{r}
-read_measures <- function(files) {  
-  dates <- utils::strcapture("di_aice_(\\d{8})_e(\\d{2})_(\\w+).nc", basename(files),
-                             proto = list(time_forecast = character(),
-                                          member = character(),
-                                          type = character())) |> 
-    as.data.table() |> 
-    _[, time_forecast := as.Date(time_forecast, format = "%Y%m%d")] |> 
-    _[]
-  
-  read <- function(i) {
-    data <- try(ReadNetCDF(files[[i]], vars = c(value = "aice")), silent = TRUE)
-    
-    if (inherits(data, "try-error")) {
-      file.remove(files[[i]])
-      message("file ", basename(files[[i]]), " deleted")
-      return(NULL)
-    }
-
-    data |> 
-      _[, let(lat = NULL, lon = NULL)] |> 
-      _[] |> 
-      _[, let(time_forecast = dates$time_forecast[[i]],
-              member = dates$member[[i]],
-              type = dates$type[[i]],
-              file = files[[i]])] |> 
-      _[] 
-  }
-  
-  lapply(seq_along(files), read) |> 
-    rbindlist() 
-}
-
 geom_cross <- function() {
   list(geom_hline(yintercept = 0), 
        geom_vline(xintercept = 0))
@@ -193,70 +203,112 @@ geom_cross <- function() {
 
 
 ```{r}
-rmse_files <- list.files(file.path(globals$data_derived, "rmse"), pattern = "di_aice_",
-                          full.names = TRUE)
+rmse <- readRDS(file.path(globals$data_derived, "rmse.Rds")) |> 
+    _[type != "climatology"]
+# iiee <- readRDS(file.path(globals$data_derived, "iiee.Rds")) |> 
+#     _[type != "persistence"]
 
-dates <- utils::strcapture("di_aice_(\\d{8})_e(\\d{2})_(\\w+).nc", basename(rmse_files),
-                             proto = list(time_forecast = character(),
-                                          member = character(),
-                                          type = character())) |> 
-    as.data.table() |> 
-    _[, time_forecast := as.Date(time_forecast, format = "%Y%m%d")] |> 
-    _[, file := rmse_files]
-
-rmse_files <- dates[type == "forecast" | (type == "persistence" & member == "01")] |> 
-    _[, file]
-
-rmse_rds <- file.path(globals$data_derived, "rmse.Rds")
-if (!file.exists(rmse_rds)) {
-    rmse <- read_measures(rmse_files) |> 
-    _[, measure := "rmse"] 
-
-    saveRDS(rmse, rmse_rds)
-
-} else {
-    rmse <- readRDS(rmse_rds)
-}
-
-
+# errors <- rbind(rmse) 
 ```
+
+```{r}
+nsidc_mean_extent <- globals$nsidc_extent_daily |> 
+    ReadNetCDF("aice") |> 
+    _[, .(mean_extent = mean(aice)), by = yday(time)]
+```
+
 
 ```{r}
 missing_daily <- globals$nsidc_area_daily |> 
     ReadNetCDF() |> 
     _[is.na(aice) | aice < 1e6, .(time)]
+
+rmse |> 
+    _[time %in% missing_daily$time, value := NA] |> 
+    _[value < 0.01, value := NA] |> 
+    _[value > 3e13, value := NA] |> 
+    _[, time := as.Date(time)] |> 
+    _[, lag := as.numeric(time - time_forecast)]
 ```
+
 
 ```{r}
 rmse |> 
-    copy() |> 
-    _[time %in% missing_daily$time, value := NA] |> 
-    _[value < 0.01, value := NA] |> 
-    _[, time := as.Date(time)] |> 
-    _[, lag := as.numeric(time - time_forecast)] |> 
     ggplot(aes(lag, value)) +
-    geom_line(data = \(x) x[type == "forecast"], 
-              aes(color = type, group = interaction(type, member, time_forecast)), 
-              alpha = 0.01) +
-    geom_line(data = \(x) x[type == "persistence"], 
-              aes(color = type, group = interaction(type, time_forecast)),
-              alpha = 0.1)  +
-    geom_line(data = \(x) x[, .(mean = mean(value, na.rm = TRUE)), by = .(lag, type)] |> 
-              aes(y = mean, color = type), linewidth = 1)
+
+    geom_line(aes(color = type, 
+                  group = interaction(type, member, time_forecast),
+                  alpha = type))  +
+    scale_alpha_manual(values = c(persistence = 0.1,
+                                  forecast = 0.01)) +
+    geom_ribbon(data = \(x) x[, .(sd = sd(value, na.rm = TRUE),
+                                  mean = mean(value, na.rm = TRUE)), 
+                                by = .(lag, type,measure)], 
+                aes(y = mean, 
+                    ymin = mean - sd*2, 
+                    ymax = mean + sd*2, 
+                    color = type, 
+                    fill = type), alpha = 0.1) +
+    geom_line(data = \(x) x[, .(mean = mean(value, na.rm = TRUE)), 
+                                by = .(lag, type, measure)],
+             aes(y = mean, color = type), linewidth = 1) +
+    facet_wrap(~ measure, scales = "free_y")
+
     
 ```
 
 
 ```{r}
-rmse |> 
-    copy() |> 
-    _[time %in% missing_daily$time, value := NA] |> 
-    _[value < 0.01, value := NA] |> 
-    _[, time := as.Date(time)] |> 
-    _[, lag := as.numeric(time - time_forecast)] |> 
-    _[, .(mean = mean(value, na.rm = TRUE)), by = .(lag, month(time_forecast), type)]  |> 
+mean_rmse <- rmse[, .(sd = sd(value, na.rm = TRUE),
+                      mean = median(value, na.rm = TRUE),
+                      n = .N), 
+                  by = .(lag, type,measure, month(time_forecast))]
+```
+
+```{r}
+mean_rmse |> 
     ggplot(aes(lag, mean)) +
+    geom_ribbon(aes(ymin = mean - sd*2, ymax = mean + sd*2, 
+                    color = type, fill = type), alpha = 0.1) +
     geom_line(aes(color = type)) +
     facet_wrap(~ month)
+```
 
+
+```{r}
+important_lags <- seq(2, 279, by = 31)
+rmse |>
+    copy() |> 
+    _[type == "forecast"] |> 
+    _[, initial := value[lag == 1], by = .(time_forecast, member)] |> 
+    _[lag != 1] |> 
+    _[lag %in% important_lags] |> 
+    ggplot(aes(initial, value)) +
+    geom_point() +
+    geom_smooth(method = "lm", fullrange = TRUE) +
+    expand_limits(x = 0) +
+    facet_wrap(~ lag)
+```
+
+```{r}
+rmse |>
+    copy() |> 
+    _[type == "forecast"] |> 
+    _[, initial := value[lag == 1], by = .(time_forecast, member)] |> 
+    _[lag != 1]  |> 
+    _[, FitLm(value, initial, se = TRUE), by = .(month = lubridate::month(time_forecast, label = FALSE), lag)] |> 
+    _[term == "(Intercept)"] |> 
+    ggplot(aes(lag, month)) +
+    geom_contour_fill(aes(z = r.squared)) 
+```
+
+
+```{r}
+rmse |> 
+    _[type == "forecast"] |> 
+    _[, .(sd = sd(value, na.rm = TRUE)), by  = .(lag, time, time_forecast)] |> 
+    _[, .(sd = mean(sd, na.rm = TRUE)), by = .(lag, month(time_forecast))] |> 
+    ggplot(aes(lag, sd)) +
+    geom_line() +
+    facet_wrap(~month)
 ```
