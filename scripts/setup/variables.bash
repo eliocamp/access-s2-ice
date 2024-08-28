@@ -57,7 +57,22 @@ cdo_remap_nsidc="mul ${land_mask} -remapbil,${nsidc_grid}"
 cdo_extent="fldint -gtc,0.15"
 cdo_area="fldint -setvrange,0.15,1"
 
+cdo_smooth_climatology () {
+    local runmean_number=$1
+    local daily_data=$2
+    local clim_file=$3
 
+    local noisy_clim="${clim_file}.temp"
+
+    cdo -L -setyear,2000 -ydaymean -seldate,1981-01-01,2011-12-31 $daily_data $noisy_clim
+
+    # Second cdo command
+    first="-seltimestep,1/${runmean_number}/1 $noisy_clim"
+    last="-seltimestep,-${runmean_number}/-1 $noisy_clim"
+
+    cdo -L -selyear,2000 -runmean,$runmean_number -mergetime [ -setyear,1999 $last $noisy_clim -setyear,2001 $first ] $clim_file
+    rm $noisy_clim
+}
 
 access_sst="${data_derived}/access_sst.nc"
 era5_sst="${data_derived}/era5_sst.nc"

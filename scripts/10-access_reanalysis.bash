@@ -29,4 +29,6 @@ if [ ! -f $access_reanalysis_daily ]; then
     rm $data_temp/temp_*.nc
 fi
 
-cdo -L -ydaymean -seldate,1981-01-01,2011-12-31 $access_reanalysis_daily $access_reanalysis_climatology_daily
+cdo_smooth_climatology 11 $access_reanalysis_daily $access_reanalysis_climatology_daily
+
+cdo -L ydaysub $access_reanalysis_daily $access_reanalysis_climatology_daily $access_renalysis_anomaly_daily

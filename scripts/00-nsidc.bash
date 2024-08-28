@@ -34,7 +34,7 @@ max_jobs=8
 job_count=0
 
 for year in {1981..2023}; do
-    nsidc_daily_url="https://polarwatch.noaa.gov/erddap/griddap/nsidcG02202v4sh1day.nc?cdr_seaice_conc[($year-01-01T00:00:00Z):1:($year-12-31T00:00:00Z)][(4350000.0):1:(-3950000.0)][(-3950000.0):1:(3950000.0)]"
+        nsidc_daily_url="https://polarwatch.noaa.gov/erddap/griddap/nsidcG02202v4sh1day.nc?cdr_seaice_conc[($year-01-01T00:00:00Z):1:($year-12-31T00:00:00Z)][(4350000.0):1:(-3950000.0)][(-3950000.0):1:(3950000.0)]"
     file=$data_raw/nsidc_daily/$year.nc
     
     # Download if doesn't exist
@@ -60,5 +60,7 @@ cdo -L -chname,cdr_seaice_conc,aice -mul $land_mask -setvrange,0,1  -setgrid,$ns
 
 # Compute NSIDC anomaly
 echo "Computing daily climagology and anomalies"
-cdo -L -ydaymean -seldate,1981-01-01,2011-12-31 $nsidc_daily_data $nsidc_climatology_daily
-cdo -L -ydaysub $nsidc_daily_data $nsidc_climatology_daily $nsidc_daily_anomaly
+
+cdo_smooth_climatology 11 $nsidc_daily_data $nsidc_climatology_daily
+
+cdo -L ydaysub $nsidc_daily_data $nsidc_climatology_daily $nsidc_daily_anomaly
