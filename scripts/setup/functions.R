@@ -1,6 +1,6 @@
 
 
-get_envars <- function(file = "scripts/setup/variables.bash") {
+get_envars <- function(file = here::here("scripts/setup/variables.bash")) {
         old <- Sys.getenv()
         readRenviron(file)
         new <- Sys.getenv()
