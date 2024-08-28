@@ -75,4 +75,7 @@ cdo_smooth_climatology () {
 }
 
 access_sst="${data_derived}/access_sst.nc"
+access_sst_mean="${data_derived}/access_sst_mean.nc"
+
 era5_sst="${data_derived}/era5_sst.nc"
+era5_sst_mean="${data_derived}/era5_sst_mean.nc"
