@@ -2,12 +2,12 @@
 
 #PBS -P dx2
 #PBS -q normal
-#PBS -l ncpus=48
+#PBS -l ncpus=40
 #PBS -l mem=190GB
 #PBS -l walltime=03:00:00
 #PBS -l wd
 #PBS -l jobfs=400GB
-#PBS -l storage=gdata/ux62+scratch/k10
+#PBS -l storage=gdata/ux62+scratch/k10+gdata/ub7
 
 # Load module, always specify version number.
 module load R/4.3.1
@@ -18,5 +18,4 @@ module load cdo/2.0.5
 # https://opus.nci.org.au/display/Help/PBS+Directives+Explained
 
 # Run R application
-export PBS_WORKERS=100
-Rscript scripts/40-hindast.R > log-hindcast.txt
+Rscript scripts/70-rmse-s1.R > log-hindcast_area.txt
