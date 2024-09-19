@@ -1,5 +1,9 @@
 library(furrr)
-plan(multisession, workers = 48)
+workers <- as.numeric(Sys.getenv("PBS_WORKERS", unset = 25))
+message(workers, " workers")
+
+plan(multisession, workers = workers)
+
 library(rcdo)
 cdo_options_set(c("-L", "--pedantic"))
 library(data.table)
@@ -11,7 +15,7 @@ source("scripts/setup/functions.R")
 nsidc_anomaly <- globals$nsidc_daily_anomaly
 nsidc_data  <- globals$nsidc_daily_data
 climatology <- globals$access_reanalysis_climatology_daily
-nsidc_climatology <- globals$nsidc_daily_climatology
+nsidc_climatology <- globals$nsidc_climatology_daily
 
 
 cdo_del29feb <- function(input, output = NULL) {
@@ -40,9 +44,15 @@ dir.create(iiee_dir, showWarnings = FALSE)
 
 
 files <- CJ(time = dates, member = members) |> 
-    _[, file := paste0(dir, "e", member, "/di_aice_", format(time, "%Y%m%d"), "_e", member, ".nc" )] |> 
+    _[, file := paste0(dir, "e", member, "/di_aice_", format(time, "%Y%m%d"), "_e", member, ".nc")] |> 
     _[] |> 
     as.data.frame()
+
+files <- rbind(files, 
+ CJ(time = dates, member = "mm")  |> 
+    _[, file := file.path(globals$data_derived, "hindcast_ensmean", 
+                         paste0("di_aice_", format(time, "%Y%m%d"), "_e", member, ".nc"))]  
+)
 
 cdo_rmse <- function(file1, file2) {
     cdo_sub(file1, file2) |> 
@@ -93,17 +103,20 @@ compute_metrics <- function(i) {
 
     rmse_out <- file.path(rmse_dir, gsub("\\.nc", "_forecast.nc", basename(file$file)))
     iiee_out <- file.path(iiee_dir, gsub("\\.nc", "_forecast.nc", basename(file$file)))
-    extent_out <- file.path(globals$data_derived, "hindcast_area", "daily", "Antarctic", basename(file$file))
 
-    rmse_out_persistence <- file.path(rmse_dir, gsub("\\_e\\d{2}.nc", "_e01_persistence.nc", basename(file$file)))
-    iiee_out_persistence <- file.path(iiee_dir, gsub("\\_e\\d{2}.nc", "_e01_persistence.nc", basename(file$file)))
+    rmse_out_persistence <- file.path(rmse_dir, gsub("\\_e[\\da-z]{2}.nc", "_e01_persistence.nc", basename(file$file), perl = TRUE))
+    iiee_out_persistence <- file.path(iiee_dir, gsub("\\_e[\\da-z]{2}.nc", "_e01_persistence.nc", basename(file$file), perl = TRUE))
 
-    rmse_out_climatology <- file.path(rmse_dir, gsub("\\_e\\d{2}.nc", "_e01_climatology.nc", basename(file$file)))
-    iiee_out_climatology  <- file.path(iiee_dir, gsub("\\_e\\d{2}.nc", "_e01_climatology.nc", basename(file$file)))
+    rmse_out_climatology <- file.path(rmse_dir, gsub("\\_e[\\da-z]{2}.nc", "_e01_climatology.nc", basename(file$file), perl = TRUE))
+    iiee_out_climatology  <- file.path(iiee_dir, gsub("\\_e[\\da-z]{2}.nc", "_e01_climatology.nc", basename(file$file), perl = TRUE))
 
     if (all(file.exists(c(rmse_out_persistence, rmse_out, iiee_out, iiee_out_persistence, rmse_out_climatology, iiee_out_climatology)))) {
         return()
     }
+
+    ff <- c(rmse_out_persistence, rmse_out, iiee_out, iiee_out_persistence, rmse_out_climatology, iiee_out_climatology)
+    
+    stopifnot(!any(grepl("e\\d{2}.nc", ff)))
 
     nc <- ncdf4::nc_open(file$file)
     times <- metR:::.parse_time(time = nc$dim$time$vals, units = nc$dim$time$units, calendar = nc$dim$time$calendar)
@@ -125,38 +138,40 @@ compute_metrics <- function(i) {
     nc <- ncdf4::nc_open(nsidc_data_part)
     times_nsidc <- metR:::.parse_time(time = nc$dim$time$vals, units = nc$dim$time$units, calendar = nc$dim$time$calendar)
     ncdf4::nc_close(nc)
-    
-    if (!all(file.exists(rmse_out, iiee_out, extent_out))) {
-        remapped <- file$file |> 
-                    cdo_selname("aice") |> 
-                    cdo_remap_nsidc() |> 
-                    cdo_del29feb() |> 
-                    cdo_execute(output = tempfile(pattern = basename(file$file)))
 
-        nc <- ncdf4::nc_open(remapped)
+    remap_file <- tempfile(pattern = basename(file$file))
+
+    remapped <- function() {   
+        if (file.exists(remap_file)) {
+            return(remap_file)
+        }
+
+        remap_file <- file$file |> 
+                cdo_selname("aice") |> 
+                cdo_remap_nsidc() |> 
+                cdo_del29feb() |> 
+                cdo_execute(output = remap_file)
+        
+        nc <- ncdf4::nc_open(remap_file)
         times_access <- metR:::.parse_time(time = nc$dim$time$vals, units = nc$dim$time$units, calendar = nc$dim$time$calendar)
         ncdf4::nc_close(nc)
 
         if (length(times_access) != length(times_nsidc)) {
             stop("malos tiempos en ", i)
         }
-    }
 
-    if (!file.exists(extent_out)) {
-        remapped |> 
-            cdo_extent() |> 
-            cdo_execute(output = extent_out)
+        return(remap_file)
     }
     
     if (!file.exists(rmse_out)) {
-        remapped |> 
+        remapped() |> 
             cdo_ydaysub(climatology) |>        
             cdo_rmse(nsidc_anomaly_part) |> 
             cdo_execute(output = rmse_out)
     }
 
     if (!file.exists(iiee_out)) {
-        cdo_iiee(remapped, nsidc_data_part, output = iiee_out) 
+        cdo_iiee(remapped(), nsidc_data_part, output = iiee_out) 
     }
 
     if (!file.exists(rmse_out_persistence)) {
@@ -192,32 +207,23 @@ compute_metrics <- function(i) {
         if (length(times_clim) != length(times_nsidc)) {
             stop("malos tiempos en la climatología de ", i)
         }
-
-        rmse_climatology <- cdo_rmse(nsidc_data_part, clim) |> 
-            cdo_execute(output = rmse_out_climatology)    
-    }
-
-    if (!file.exists(iiee_out_climatology)) {
-        if (!exists("clim")) {
-            clim  <- cdo_climextrapolate(climatology_twice, first_time, last_time)
-        }
-        
+                
         cdo_iiee(nsidc_data_part, clim, output = iiee_out_climatology)
     }
 
-    file.remove(c(nsidc_data_part, nsidc_anomaly_part))
+    file.remove(c(remap_file, nsidc_data_part, nsidc_anomaly_part))
     
-    remove_if_exists(c("remapped", "persistence", "clim"))
+    remove_if_exists(c("persistence", "clim"))
 }
 
 
 out <- furrr::future_map(seq_len(nrow(files)), compute_metrics)
 
 read_measures <- function(files) {  
-  dates <- utils::strcapture("di_aice_(\\d{8})_e(\\d{2})_(\\w+).nc", basename(files),
+  dates <- utils::strcapture("di_aice_(\\d{8})_e([\\dm]{2})_(\\w+).nc", basename(files),
                              proto = list(time_forecast = character(),
                                           member = character(),
-                                          type = character())) |> 
+                                          type = character()), perl = TRUE) |> 
     as.data.table() |> 
     _[, time_forecast := as.Date(time_forecast, format = "%Y%m%d")] |> 
     _[]
