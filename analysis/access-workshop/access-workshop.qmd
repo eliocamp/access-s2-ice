@@ -11,6 +11,7 @@ library(data.table)
 library(metR)
 library(rcdo)
 cdo_options_set("-L")
+h <- here::here
 source(here::here("scripts/setup/functions.R"))
 ```
 
@@ -25,19 +26,21 @@ theme_set(theme_minimal() +
             ))
 wide_legend <- theme(legend.key.width = unit(1, 'null'))
 ```
+
 ```{r}
 get <- `$`
 
 sic_projection <- globals$nsidc_climatology_monthly |>  
+  h() |> 
   ncdf4::nc_open() |>  
   ncdf4::ncatt_get(varid = "crs") |> 
   get("proj_params")
 
-topo <- cdo_topo(grid = globals$nsidc_grid, 
-                 ofile = file.path(globals$data_derived, "topo.nc")) |> 
-    cdo_execute(options = c("-f nc")) |> 
-    ReadNetCDF(c(z = "topo")) |> 
-    _[, .(x = xgrid, y = ygrid, z)]
+topo <- cdo_topo(grid = h(globals$nsidc_grid), 
+                 ofile = h(globals$data_derived, "topo.nc")) |> 
+  cdo_execute(options = c("-f nc")) |> 
+  ReadNetCDF(c(z = "topo")) |> 
+  _[, .(x = xgrid, y = ygrid, z)]
 
 contour <- StatContour$compute_group(topo, breaks = 0)
 geom_antarctica_path <- geom_path(data = contour, aes(x, y, group = group), inherit.aes = FALSE, colour = "black")
@@ -45,69 +48,71 @@ geom_antarctica_path <- geom_path(data = contour, aes(x, y, group = group), inhe
 geom_antarctica_fill <- geom_polygon(data = contour, aes(x, y, group = group), inherit.aes = FALSE, colour = "black", fill ="#FAFAFA")
 
 geomcoord_antarctica <- list(NULL
-    , coord_sf(crs = sic_projection, lims_method = "box")
-    , scale_x_continuous(name = NULL, expand = c(0, 0))
-    , scale_y_continuous(name = NULL, expand = c(0, 0))
-    , geom_antarctica_path
+                             , coord_sf(crs = sic_projection, lims_method = "box")
+                             , scale_x_continuous(name = NULL, expand = c(0, 0))
+                             , scale_y_continuous(name = NULL, expand = c(0, 0))
+                             , geom_antarctica_path
 )
 
 scale_color_models <- scale_color_manual(NULL, 
-                     values = c(access = "black", 
-                                hadisst = "#3584e4", 
-                                nsidc = "#e66100"),
-                     labels = c(access = "ACCESS-S2",
-                                hadisst = "HadISST",
-                                nsidc = "NSIDC CDRV4"))
+                                         values = c(access = "black", 
+                                                    hadisst = "#3584e4", 
+                                                    nsidc = "#e66100"),
+                                         labels = c(access = "ACCESS-S2",
+                                                    hadisst = "HadISST",
+                                                    nsidc = "NSIDC CDRV4"))
 
 ```
 
 ```{r}
 climatology <- merge(
-    globals$nsidc_climatology_monthly |> 
-        ReadNetCDF(c(nsidc = "aice")) |> 
-        _[, time := as.Date(time)],
-
-    globals$access_renalysis_climatology_monthly |> 
-        ReadNetCDF(c(access = "aice")) |> 
-        _[, time := as.Date(time)]
+  globals$nsidc_climatology_monthly |> 
+    h() |> 
+    ReadNetCDF(c(nsidc = "aice")) |> 
+    _[, time := as.Date(time)],
+  
+  globals$access_renalysis_climatology_monthly |> 
+    h() |> 
+    ReadNetCDF(c(access = "aice")) |> 
+    _[, time := as.Date(time)]
 )
-    
+
 climatology |> 
-    ggplot(aes(xgrid, ygrid)) +
-    geom_contour_fill(aes(z = access - nsidc, fill = after_stat(level)), 
-                      breaks = anchor_limits(binwidth = 0.1, exclude = 0, range = c(-0.5, 0.5))) +
-    scale_fill_divergent_discretised("ACCESS-S2 bias") +
-    geomcoord_antarctica +
-    geom_antarctica_fill +
-    facet_wrap(~ lubridate::month(time, label = TRUE)) +
-    wide_legend
+  ggplot(aes(xgrid, ygrid)) +
+  geom_contour_fill(aes(z = access - nsidc, fill = after_stat(level)), 
+                    breaks = anchor_limits(binwidth = 0.1, exclude = 0, range = c(-0.5, 0.5))) +
+  scale_fill_divergent_discretised("ACCESS-S2 bias") +
+  geomcoord_antarctica +
+  geom_antarctica_fill +
+  facet_wrap(~ lubridate::month(time, label = TRUE)) +
+  wide_legend
 ```
 
 
 ```{r}
 access_sst_clim <- globals$access_sst |> 
-    cdo_ymonmean() |> 
-    cdo_setyear(2000) |> 
-    cdo_execute()
+  cdo_ymonmean() |> 
+  cdo_setyear(2000) |> 
+  cdo_execute()
 
 grid <- access_sst_clim |> 
-    ReadNetCDF(c(lon = "nav_lon", lat = "nav_lat"))
+  ReadNetCDF(c(lon = "nav_lon", lat = "nav_lat"))
 
 era5_sst_clim <- globals$era5_sst |> 
-    cdo_ymonmean() |> 
-    cdo_setyear(2000) |> 
-    cdo_execute()
+  cdo_ymonmean() |> 
+  cdo_setyear(2000) |> 
+  cdo_execute()
 
 sst <- merge(
-    access_sst_clim |> 
-        ReadNetCDF(c(access = "sst")) |> 
-        setnames("time_counter", "time") |> 
-        _[, time := as.Date(time)] |> 
-        _[, deptht := NULL],
-    era5_sst_clim |> 
-        ReadNetCDF(c(era5 = "sst")) |> 
-        _[, time := as.Date(time)] |> 
-        _[, era5 := era5 - 273.15]
+  access_sst_clim |> 
+    ReadNetCDF(c(access = "sst")) |> 
+    setnames("time_counter", "time") |> 
+    _[, time := as.Date(time)] |> 
+    _[, deptht := NULL],
+  era5_sst_clim |> 
+    ReadNetCDF(c(era5 = "sst")) |> 
+    _[, time := as.Date(time)] |> 
+    _[, era5 := era5 - 273.15]
 )
 
 sst <- merge(grid, sst)
@@ -115,59 +120,59 @@ sst <- merge(grid, sst)
 
 ```{r}
 sst |> 
-    copy() |> 
-    _[abs(access - era5) > 5, era5 := NA] |> 
-    ggplot(aes(lon, lat)) +
-    geom_contour_fill(aes(z = access - era5), 
-        proj = sic_projection, proj.latlon = FALSE) +
-    scale_fill_divergent() +
-    geomcoord_antarctica +
-    geom_antarctica_fill +
-    facet_wrap(~month(time))
+  copy() |> 
+  _[abs(access - era5) > 5, era5 := NA] |> 
+  ggplot(aes(lon, lat)) +
+  geom_contour_fill(aes(z = access - era5), 
+                    proj = sic_projection, proj.latlon = FALSE) +
+  scale_fill_divergent() +
+  geomcoord_antarctica +
+  geom_antarctica_fill +
+  facet_wrap(~month(time))
 ```
 ```{r}
 extent <- merge(
-    ReadNetCDF(globals$nsidc_extent_monthly, vars = c(nsidc = "aice")) |> 
-        _[, let(lon = NULL, lat = NULL, time = as.Date(time))] |> 
-        _[, tidyr::complete(.SD, time = seq(min(time),
+  ReadNetCDF(globals$nsidc_extent_monthly, vars = c(nsidc = "aice")) |> 
+    _[, let(lon = NULL, lat = NULL, time = as.Date(time))] |> 
+    _[, tidyr::complete(.SD, time = seq(min(time),
                                         max(time),
                                         "1 month"))],
-    ReadNetCDF(globals$access_extent_monthly, vars = c(access = "aice")) |> 
-        _[, let(lon = NULL, lat = NULL, time = as.Date(time))] |> 
-        _[, tidyr::complete(.SD, time = seq(min(time),
+  ReadNetCDF(globals$access_extent_monthly, vars = c(access = "aice")) |> 
+    _[, let(lon = NULL, lat = NULL, time = as.Date(time))] |> 
+    _[, tidyr::complete(.SD, time = seq(min(time),
                                         max(time),
                                         "1 month"))]
 )  |> 
-    as.data.table()
+  as.data.table()
 
 extent |> 
-    melt(id.vars = "time") |>
-    _[value == 0, value := NA]  |> 
-    _[, value := Anomaly(value, year(time) %between% c(1981, 2011), na.rm = TRUE), 
-        by = .(month(time), variable)] |> 
-    ggplot(aes(time, value)) +
-    geom_line(aes(color = variable)) +
-    geom_smooth(aes(color = variable), method = "lm",
+  melt(id.vars = "time") |>
+  _[value == 0, value := NA]  |> 
+  _[, value := Anomaly(value, year(time) %between% c(1981, 2011), na.rm = TRUE), 
+    by = .(month(time), variable)] |> 
+  ggplot(aes(time, value)) +
+  geom_line(aes(color = variable)) +
+  geom_smooth(aes(color = variable), method = "lm",
               formula = y ~ x +
                 I(pmax(x - as.numeric(as.Date("2005-12-01")), 0)) +
                 I(pmax(x - as.numeric(as.Date("2012-12-01")), 0)),
               n = 100
-    ) +
-    scale_y_continuous("Extent/area (million km²)",
+  ) +
+  scale_y_continuous("Extent/area (million km²)",
                      labels = scales::label_number(scale = 1e-12)) +
-    scale_x_date(NULL, expand = c(0, 0)) +
-    scale_color_models
+  scale_x_date(NULL, expand = c(0, 0)) +
+  scale_color_models
 ```
 
 
 ```{r}
 extent |> 
-    melt(id.vars = "time") |>
-    _[value == 0, value := NA]  |> 
-    _[, value := Anomaly(value, year(time) %between% c(1981, 2011), na.rm = TRUE), 
-        by = .(month(time), variable)] |> 
-    dcast(time ~ variable, value.var = "value") |> 
-    ggplot(aes(nsidc, access)) +
+  melt(id.vars = "time") |>
+  _[value == 0, value := NA]  |> 
+  _[, value := Anomaly(value, year(time) %between% c(1981, 2011), na.rm = TRUE), 
+    by = .(month(time), variable)] |> 
+  dcast(time ~ variable, value.var = "value") |> 
+  ggplot(aes(nsidc, access)) +
   geom_point(size = 0.4) +
   geom_smooth() +
   geom_abline() +
@@ -175,20 +180,20 @@ extent |>
                      labels = scales::label_number(scale = 1e-12)) +
   scale_y_continuous("ACCESS extent (million km²)",
                      labels = scales::label_number(scale = 1e-12)) +
-    # coord_equal() +
-    # facet_wrap(~lubridate::month(time, label = TRUE)) 
-    NULL
+  # coord_equal() +
+  # facet_wrap(~lubridate::month(time, label = TRUE)) 
+  NULL
 ```
 
 
 ```{r}
 extent |> 
-    melt(id.vars = "time") |>
-    _[value == 0, value := NA]  |> 
-    _[, value := Anomaly(value, year(time) %between% c(1981, 2011), na.rm = TRUE), 
-        by = .(month(time), variable)]  |> 
-    ggplot(aes(lubridate::month(time, label = TRUE), value)) +
-    geom_boxplot()
+  melt(id.vars = "time") |>
+  _[value == 0, value := NA]  |> 
+  _[, value := Anomaly(value, year(time) %between% c(1981, 2011), na.rm = TRUE), 
+    by = .(month(time), variable)]  |> 
+  ggplot(aes(lubridate::month(time, label = TRUE), value)) +
+  geom_boxplot()
 ```
 
 
@@ -203,58 +208,254 @@ geom_cross <- function() {
 
 
 ```{r}
-rmse <- readRDS(file.path(globals$data_derived, "rmse.Rds")) |> 
-    _[type != "climatology"]
-# iiee <- readRDS(file.path(globals$data_derived, "iiee.Rds")) |> 
-#     _[type != "persistence"]
+rmse <- readRDS(h(globals$data_derived, "rmse.Rds")) |> 
+  _[type != "climatology"]
 
-# errors <- rbind(rmse) 
+iiee <- readRDS(file.path(globals$data_derived, "iiee.Rds")) |> 
+  _[type == "forecast"] |> 
+  _[, model := "S2"] |> 
+  rbind(
+    readRDS(file.path(globals$data_derived, "iiee-s1.Rds")) |> 
+      _[, model := "S1"]
+  )
 ```
 
 ```{r}
 nsidc_mean_extent <- globals$nsidc_extent_daily |> 
-    ReadNetCDF("aice") |> 
-    _[, .(mean_extent = mean(aice)), by = yday(time)]
+  h() |> 
+  ReadNetCDF("aice") |> 
+  _[, .(mean_extent = mean(aice)), by = yday(time)]
 ```
 
 
 ```{r}
 missing_daily <- globals$nsidc_area_daily |> 
-    ReadNetCDF() |> 
-    _[is.na(aice) | aice < 1e6, .(time)]
+  h() |> 
+  ReadNetCDF() |> 
+  _[is.na(aice) | aice < 1e6, .(time)]
 
 rmse |> 
-    _[time %in% missing_daily$time, value := NA] |> 
-    _[value < 0.01, value := NA] |> 
-    _[value > 3e13, value := NA] |> 
-    _[, time := as.Date(time)] |> 
-    _[, lag := as.numeric(time - time_forecast)]
+  _[time %in% missing_daily$time, value := NA] |> 
+  _[value < 0.01, value := NA] |> 
+  _[value > 3e13, value := NA] |> 
+  _[, time := as.Date(time)] |> 
+  _[, lag := as.numeric(time - time_forecast)] |> 
+  _[member == "mm", type := "mm"] 
+```
+
+```{r}
+rmse |> 
+  _[member == "mm", type := "mm"]  |> 
+  _[time %in% missing_daily$time, value := NA] |> 
+  _[value < 0.01, value := NA] |> 
+  _[value > 3e13, value := NA] |> 
+  _[, time := as.Date(time)] |> 
+  _[, lag := as.numeric(time - time_forecast)] |> 
+  _[member == "mm", type := "mm"] 
+```
+
+```{r}
+iiee |> 
+  _[lag > 0] |> 
+  _[!(month(time_forecast) == 1 & member == "07" & model == "S1")] |> 
+  ggplot(aes(lag, value)) +
+  # geom_line(aes(color = model, 
+  #               group = interaction(model, member, time_forecast),
+  #               alpha = model))  +
+  # scale_alpha_manual(values = c(S1 = 0.01,
+  #                               S2 = 0.01)) +
+  geom_ribbon(data = \(x) x[, .(sd = sd(value, na.rm = TRUE),
+                                mean = mean(value, na.rm = TRUE)), 
+                            by = .(lag, model, measure)], 
+              aes(y = mean, 
+                  ymin = mean - sd*2, 
+                  ymax = mean + sd*2, 
+                  color = model, 
+                  fill = model), alpha = 0.1) +
+  geom_line(data = \(x) x[, .(mean = mean(value, na.rm = TRUE)), 
+                          by = .(lag, model, measure)],
+            aes(y = mean, color = model), linewidth = 1) +
+  labs(y = "Integrated Ice Edge Error", 
+       x = "Lag") 
+```
+
+
+```{r}
+iiee |> 
+  _[lag > 0] |> 
+  _[!(month(time_forecast) == 1 & member == "07" & model == "S1")] |> 
+  ggplot(aes(lag, value)) +
+  # geom_line(aes(color = model, 
+  #               group = interaction(model, member, time_forecast),
+  #               alpha = model))  +
+  # scale_alpha_manual(values = c(S1 = 0.01,
+  #                               S2 = 0.01)) +
+  geom_ribbon(data = \(x) x[, .(sd = sd(value, na.rm = TRUE),
+                                mean = mean(value, na.rm = TRUE)), 
+                            by = .(lag, model, measure)], 
+              aes(y = mean, 
+                  ymin = mean - sd*2, 
+                  ymax = mean + sd*2, 
+                  color = model, 
+                  fill = model), alpha = 0.1) +
+  geom_line(data = \(x) x[, .(mean = mean(value, na.rm = TRUE)), 
+                          by = .(lag, model, measure)],
+            aes(y = mean, color = model), linewidth = 1) +
+  labs(y = "Integrated Ice Edge Error", 
+       x = "Lag") 
+```
+
+```{r}
+iiee |> 
+  _[lag > 0] |> 
+  _[, month := lubridate::month(time_forecast, label = TRUE)]  |> 
+  _[!(month == "Jan" & member == "07")] |> 
+  # _[month == 1] |> 
+  # _[model == "S1"] |> 
+  ggplot(aes(lag, value)) +
+  # geom_line(aes(color = model, 
+  #               group = interaction(model, member, time_forecast),
+  #               alpha = model))  +
+  # scale_alpha_manual(values = c(S1 = 0.1,
+  #                               S2 = 0.1)) +
+  geom_ribbon(data = \(x) x[, .(sd = sd(value, na.rm = TRUE),
+                                mean = mean(value, na.rm = TRUE)), 
+                            by = .(lag, model, month, measure)], 
+              aes(y = mean, 
+                  ymin = mean - sd*2, 
+                  ymax = mean + sd*2, 
+                  color = model, 
+                  fill = model), alpha = 0.1) +
+  geom_line(data = \(x) x[, .(mean = mean(value, na.rm = TRUE)), 
+                          by = .(lag, model, month, measure)],
+            aes(y = mean, color = model), linewidth = 1) +
+  labs(y = "Integrated Ice Edge Error", 
+       x = "Lag") +
+  facet_wrap(~ month)
+```
+
+
+```{r}
+
+jan <- iiee |> 
+  _[lag > 0] |> 
+  _[, month := month(time_forecast)]  |> 
+  _[month == 1] |> 
+  _[model == "S1"] 
+
+
+bads <- jan |> 
+  copy() |> 
+  _[lag == 1] |> 
+  _[, m := mean(value)] |> 
+  _[] |> 
+  _[value > m] |> 
+  _[, .(member, time_forecast)]
+
+iiee |> 
+  # _[lag > 0] |> 
+  _[, month := month(time_forecast)]  |> 
+  # _[month == 1] |> 
+  _[model == "S1"]  |> 
+  copy() |> 
+  _[, bad := time_forecast %in% bads] |> 
+  ggplot(aes(lag, value)) +
+  geom_line(aes(color = member == "07", 
+                group = interaction(model, member, time_forecast)))  +
+  geom_hline(yintercept = 953595350376) +
+  labs(y = "Integrated Ice Edge Error", 
+       x = "Lag")  +
+  facet_wrap(~ month)
+```
+
+```{r}
+important_lags <- seq(2, 279, by = 31)
+iiee |>
+  copy() |> 
+  _[, initial := value[lag == 1], by = .(time_forecast, member, model)] |> 
+  _[lag != 1] |> 
+  _[lag %in% important_lags] |> 
+  _[lag > 0] |> 
+  _[, month := lubridate::month(time_forecast, label = TRUE)]  |> 
+  _[!(month == "Jan" & member == "07")] |> 
+  ggplot(aes(initial, value)) +
+  geom_point() +
+  geom_smooth(method = "lm", fullrange = TRUE) +
+  expand_limits(x = 0) +
+  facet_wrap(~ lag)
+```
+
+```{r}
+s2_error_model <- iiee |>
+  copy() |> 
+  _[model == "S2"] |> 
+  _[, initial := value[lag == 1], by = .(time_forecast, member, model)] |> 
+  _[lag != 1] |> 
+  _[, .(error_model = list(lm(value ~ initial))), 
+    by = .(lag, month(time_forecast))]
+
+s2_error_model |> 
+  _[, broom::glance(error_model[[1]]), by = .(lag, month)]
+
+error_prediction <- iiee |>
+  copy() |> 
+  _[model == "S1"]  |>
+  _[, initial := value[lag == 1], by = .(time_forecast, member, model)]  |> 
+  _[lag != 1]  |> 
+  _[, month := month(time_forecast)] |> 
+  _[s2_error_model, on = .NATURAL] |> 
+  na.omit() |> 
+  _[lag > 0] |> 
+  _[, month := lubridate::month(time_forecast, label = TRUE)]  |> 
+  _[!(month == "Jan" & member == "07")]  |> 
+  _[, pred := predict(error_model[[1]], 
+                      newdata = data.frame(initial = initial)),
+    by = .(month, lag)]  |> 
+  _[, model := "S2-S1init"]  |> 
+  _[, let(month = NULL, error_model = NULL, initial = NULL)]
+
+error_prediction |>      
+  # _[month == "Nov"] |> 
+  # _[lag > 42] |> 
+  ggplot(aes(value, pred)) +
+  scattermore::geom_scattermore(alpha = 0.2, aes(color = lag > 42)) +
+  # geom_point()+
+  geom_abline() +
+  facet_wrap(~month(time_forecast))  
+
+error_prediction[, 1 - sd(value - pred)/sd(value), 
+                 by = .(lag, month(time_forecast))] |> 
+  ggplot(aes(lag, V1)) + 
+  geom_line(aes(color = factor(month)))
+
 ```
 
 
 ```{r}
 rmse |> 
-    ggplot(aes(lag, value)) +
+  copy() |> 
+  _[member == "mm", type := "mm"] |> 
+  ggplot(aes(lag, value)) +
+  
+  geom_line(aes(color = type, 
+                group = interaction(type, member, time_forecast),
+                alpha = type))  +
+  scale_alpha_manual(values = c(persistence = 0.1,
+                                forecast = 0.01)) +
+  geom_ribbon(data = \(x) x[, .(sd = sd(value, na.rm = TRUE),
+                                mean = mean(value, na.rm = TRUE)), 
+                            by = .(lag, type,measure)], 
+              aes(y = mean, 
+                  ymin = mean - sd*2, 
+                  ymax = mean + sd*2, 
+                  color = type, 
+                  fill = type), alpha = 0.1) +
+  geom_line(data = \(x) x[, .(mean = mean(value, na.rm = TRUE)), 
+                          by = .(lag, type, measure)],
+            aes(y = mean, color = type), linewidth = 1) +
+  facet_wrap(~ measure, scales = "free_y")
 
-    geom_line(aes(color = type, 
-                  group = interaction(type, member, time_forecast),
-                  alpha = type))  +
-    scale_alpha_manual(values = c(persistence = 0.1,
-                                  forecast = 0.01)) +
-    geom_ribbon(data = \(x) x[, .(sd = sd(value, na.rm = TRUE),
-                                  mean = mean(value, na.rm = TRUE)), 
-                                by = .(lag, type,measure)], 
-                aes(y = mean, 
-                    ymin = mean - sd*2, 
-                    ymax = mean + sd*2, 
-                    color = type, 
-                    fill = type), alpha = 0.1) +
-    geom_line(data = \(x) x[, .(mean = mean(value, na.rm = TRUE)), 
-                                by = .(lag, type, measure)],
-             aes(y = mean, color = type), linewidth = 1) +
-    facet_wrap(~ measure, scales = "free_y")
 
-    
 ```
 
 
@@ -267,48 +468,174 @@ mean_rmse <- rmse[, .(sd = sd(value, na.rm = TRUE),
 
 ```{r}
 mean_rmse |> 
-    ggplot(aes(lag, mean)) +
-    geom_ribbon(aes(ymin = mean - sd*2, ymax = mean + sd*2, 
-                    color = type, fill = type), alpha = 0.1) +
-    geom_line(aes(color = type)) +
-    facet_wrap(~ month)
+  ggplot(aes(lag, mean)) +
+  geom_ribbon(aes(ymin = mean - sd*2, ymax = mean + sd*2, 
+                  color = type, fill = type), alpha = 0.1) +
+  geom_line(aes(color = type)) +
+  facet_wrap(~ month)
 ```
 
 
 ```{r}
 important_lags <- seq(2, 279, by = 31)
 rmse |>
-    copy() |> 
-    _[type == "forecast"] |> 
-    _[, initial := value[lag == 1], by = .(time_forecast, member)] |> 
-    _[lag != 1] |> 
-    _[lag %in% important_lags] |> 
-    ggplot(aes(initial, value)) +
-    geom_point() +
-    geom_smooth(method = "lm", fullrange = TRUE) +
-    expand_limits(x = 0) +
-    facet_wrap(~ lag)
+  copy() |> 
+  _[type == "forecast"] |> 
+  _[, initial := value[lag == 1], by = .(time_forecast, member)] |> 
+  _[lag != 1] |> 
+  _[lag %in% important_lags] |> 
+  ggplot(aes(initial, value)) +
+  geom_point(size = 0.5) +
+  geom_smooth(method = "lm", fullrange = TRUE) +
+  expand_limits(x = 0) +
+  facet_wrap(~ lag, labeller = labeller(lag = label_both)) +
+  labs(x = "RMSE of initial condition", 
+       y = "RMSE at lag")
 ```
+
+```{r}
+rmse_model <- rmse |>
+  copy() |> 
+  _[type == "forecast"] |> 
+  _[, initial := value[lag == 1], by = .(time_forecast, member)] |> 
+  _[lag != 1] |> 
+  _[, FitLm(value, initial), by = .(lag, month(time_forecast))] 
+
+```
+
+```{r}
+
+start_error <- mean_rmse[type == "persistence"][lag == 1] |> 
+  _[, .(month, initial_error = mean)]
+
+
+rmse_perfect <- rmse |>
+  copy() |> 
+  _[type == "forecast"] |> 
+  _[, initial := value[lag == 1], by = .(time_forecast, member)] |> 
+  _[lag != 1] |> 
+  _[, .(model = list(lm(value ~ initial))), 
+    by = .(lag, month(time_forecast))] |> 
+  start_error[i = _, on = .NATURAL] |> 
+  _[, predict(model[[1]], newdata = data.frame(initial = initial_error)), by = .(month, lag)]
+
+
+```
+
+```{r}
+rmse_model |> 
+  dcast(lag + month ~ term, value.var = "estimate") |> 
+  ggplot(aes(`(Intercept)`, initial)) +
+  geom_point(aes(color = factor(month)))
+```
+
+
+```{r}
+rmse_model |> 
+  _[term == "(Intercept)"] |> 
+  ggplot(aes(lag, estimate)) +
+  geom_line(data = mean_rmse[type == "persistence"], 
+            aes(y = mean), color = "gray") +
+  geom_line() +
+  facet_wrap(~ month, labeller = labeller(month = setNames(month.abb, 1:12))) +
+  labs(x = "Lag", y = "Intercept of linear model\n(~ RMSE with perfect initial conditions)")
+```
+
+
+```{r}
+rmse_perfect |> 
+  ggplot(aes(lag, V1)) +
+  geom_line(data = mean_rmse[type == "persistence"], 
+            aes(y = mean), color = "gray") +
+  geom_line() +
+  facet_wrap(~ month, labeller = labeller(month = setNames(month.abb, 1:12))) +
+  expand_limits(y = 0) +
+  labs(x = "Lag", y = "RMSE from linear model at lag = 1\nequal to mean persistence RMSE at lag = 1")
+```
+
 
 ```{r}
 rmse |>
-    copy() |> 
-    _[type == "forecast"] |> 
-    _[, initial := value[lag == 1], by = .(time_forecast, member)] |> 
-    _[lag != 1]  |> 
-    _[, FitLm(value, initial, se = TRUE), by = .(month = lubridate::month(time_forecast, label = FALSE), lag)] |> 
-    _[term == "(Intercept)"] |> 
-    ggplot(aes(lag, month)) +
-    geom_contour_fill(aes(z = r.squared)) 
+  copy() |> 
+  _[type == "forecast"] |> 
+  _[, initial := value[lag == 1], by = .(time_forecast, member)] |> 
+  _[lag != 1]  |> 
+  _[, FitLm(value, initial, se = TRUE), by = .(month = lubridate::month(time_forecast, label = FALSE), lag)] |> 
+  _[term == "(Intercept)"] |> 
+  ggplot(aes(lag, month)) +
+  geom_contour_fill(aes(z = r.squared)) 
 ```
 
+```{r}
+hindcast_extent <- h(globals$data_derived, "hindcast_extent_daily_regions.Rds") |> 
+  readRDS() |> 
+  _[region == "Antarctic"]
+```
 
 ```{r}
-rmse |> 
-    _[type == "forecast"] |> 
-    _[, .(sd = sd(value, na.rm = TRUE)), by  = .(lag, time, time_forecast)] |> 
-    _[, .(sd = mean(sd, na.rm = TRUE)), by = .(lag, month(time_forecast))] |> 
-    ggplot(aes(lag, sd)) +
-    geom_line() +
-    facet_wrap(~month)
+sd_hindcast <- hindcast_extent |> 
+  _[, .(sd = sd(aice, na.rm = TRUE), 
+        mean = mean(aice, na.rm = TRUE)), 
+    by = .(time, region, time_forecast = init_time)] |> 
+  _[, lag := time - time_forecast]
+```
+
+```{r}
+sd_hindcast |> 
+  _[lag <= 42] |> 
+  _[, .(sd = mean(sd, na.rm = TRUE)), by = .(lag, month(time_forecast))] |> 
+  _[, time := lubridate::make_date(2000, month, 1) + lag] |> 
+  _[, time2 := update(time, year = 2000)] |> 
+  _[, piece := year(time) == year(time2)] |> 
+  ggplot(aes(time2, sd)) +
+  # geom_ribbon(aes(ymin = mean - sd*2, ymax = mean + sd*2,
+  #                 color = factor(month), fill = factor(month),
+  #                 group = interaction(piece, month)), alpha = 0.1) +
+  # geom_line(data = copy(mean_extent)[, time := as.Date(time)], 
+  #           aes(time, scales::rescale(nsidc, c(0, 0.2))), 
+  #           color = "gray") +
+  # geom_line(data = \(x) x[type != "forecast"], color = "gray20", alpha = 0.3, 
+  #           aes(group = interaction(piece, month))) +
+  # geom_point(data = \(x) x[type != "forecast"][lag == 1], color = "gray20", alpha = 0.3) +
+  geom_line(aes(color = factor(month), group = interaction(piece, month))) +
+  geom_point(data = \(x) x[lag == 1], 
+             aes(color = factor(month))) +
+  scale_y_continuous("Mean forecast spread") +
+  scale_x_date(NULL, date_labels = "%b", date_breaks = "1 month", 
+               minor_breaks = NULL,
+               expand = c(0, 0)) +
+  scale_color_manual("Month", 
+                     values = pals::kovesi.cyclic_mygbm_30_95_c78_s25(12),
+                     labels = month.abb, aesthetics = c("fill", "colour"), 
+                     guide = "none") 
+```
+
+```{r}
+sd_hindcast |> 
+  _[lag <= 42] |> 
+  _[, .(sd = mean(sd/mean, na.rm = TRUE)), by = .(lag, month(time_forecast))] |> 
+  _[, time := lubridate::make_date(2000, month, 1) + lag] |> 
+  _[, time2 := update(time, year = 2000)] |> 
+  _[, piece := year(time) == year(time2)] |> 
+  ggplot(aes(time2, sd)) +
+  # geom_ribbon(aes(ymin = mean - sd*2, ymax = mean + sd*2,
+  #                 color = factor(month), fill = factor(month),
+  #                 group = interaction(piece, month)), alpha = 0.1) +
+  # geom_line(data = copy(mean_extent)[, time := as.Date(time)], 
+  #           aes(time, scales::rescale(nsidc, c(0, 0.2))), 
+  #           color = "gray") +
+  # geom_line(data = \(x) x[type != "forecast"], color = "gray20", alpha = 0.3, 
+  #           aes(group = interaction(piece, month))) +
+  # geom_point(data = \(x) x[type != "forecast"][lag == 1], color = "gray20", alpha = 0.3) +
+  geom_line(aes(color = factor(month), group = interaction(piece, month))) +
+  geom_point(data = \(x) x[lag == 1], 
+             aes(color = factor(month))) +
+  scale_y_continuous("Mean forecast mean-normalised spread") +
+  scale_x_date(NULL, date_labels = "%b", date_breaks = "1 month", 
+               minor_breaks = NULL,
+               expand = c(0, 0)) +
+  scale_color_manual("Month", 
+                     values = pals::kovesi.cyclic_mygbm_30_95_c78_s25(12),
+                     labels = month.abb, aesthetics = c("fill", "colour"), 
+                     guide = "none") 
 ```
