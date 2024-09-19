@@ -82,3 +82,35 @@ anchor_limits <- function(anchor = 0, binwidth = NULL, exclude = NULL,  bins = 1
     
   }
 }
+
+get <- `$`
+
+sic_projection <- globals$nsidc_climatology_monthly |>  
+  ncdf4::nc_open() |>  
+  ncdf4::ncatt_get(varid = "crs") |> 
+  get("proj_params")
+
+topo <- cdo_topo(grid = globals$nsidc_grid, 
+                 ofile = file.path(globals$data_derived, "topo.nc")) |> 
+    cdo_execute(options = c("-f nc")) |> 
+    ReadNetCDF(c(z = "topo")) |> 
+    _[, .(x = xgrid, y = ygrid, z)]
+
+contour <- StatContour$compute_group(topo, breaks = 0)
+geom_antarctica_path <- geom_path(data = contour, aes(x, y, group = group), inherit.aes = FALSE, colour = "black")
+
+geom_antarctica_fill <- geom_polygon(data = contour, aes(x, y, group = group), inherit.aes = FALSE, colour = "black", fill ="#FAFAFA")
+
+geomcoord_antarctica <- list(NULL
+    , coord_sf(crs = sic_projection, lims_method = "box")
+    , scale_x_continuous(name = NULL, expand = c(0, 0))
+    , scale_y_continuous(name = NULL, expand = c(0, 0))
+    , geom_antarctica_path
+)
+
+scale_color_models <- scale_color_manual(NULL, 
+                     values = c(access = "black", 
+                                nsidc = "#e66100"),
+                     labels = c(access = "ACCESS-S2",
+                                nsidc = "NSIDC CDRV4"))
+
