@@ -4,7 +4,7 @@ get_envars <- function(file = here::here("scripts/setup/variables.bash")) {
   new <- Sys.getenv()
   new_names <- names(new)[!(names(new) %in% names(old))]
   Sys.unsetenv(new_names)
-
+  
   as.list(new[!(names(new) %in% names(old))])
 }
 
@@ -29,15 +29,15 @@ cdo_iiee <- function(ifile1, ifile2, output, threshhold = 0.15) {
   file1 <- rcdo::cdo_gtc(ifile1, c = threshhold) |>
     rcdo::cdo_options_use("-L") |>
     rcdo::cdo_execute()
-
+  
   file2 <- rcdo::cdo_gtc(ifile2, c = threshhold) |>
     rcdo::cdo_options_use("-L") |>
     rcdo::cdo_execute()
-
+  
   out <- rcdo::cdo_ne(file1, file2) |>
     rcdo::cdo_fldint() |>
     rcdo::cdo_execute(output = output)
-
+  
   file.remove(c(file1, file2))
   return(out)
 }
@@ -55,23 +55,23 @@ anchor_limits <- function(anchor = 0, binwidth = NULL, exclude = NULL, bins = 10
       D <- max(abs(x[1] - anchor), abs(x[2] - anchor))
       x <- c(anchor - D, anchor + D)
     }
-
-
+    
+    
     if (!is.null(binwidth)) binwidth2 <- binwidth
     if (is.null(binwidth2)) {
       binwidth2 <- diff(pretty(x, bins))[1]
     }
-
+    
     mult <- ceiling((x[1] - anchor) / binwidth2) - 1L
     start <- anchor + mult * binwidth2
     b <- seq(start, x[2] + binwidth2, binwidth2)
     b <- b[!(b %in% exclude)]
-
+    
     if (!is.na(range[1])) {
       m <- min(b)
       b <- c(b[b >= (range[1] + 1e-9)], -Inf) # DAMN YOU FLOATING POINT ERRORS!!!
     }
-
+    
     if (!is.na(range[2])) {
       m <- max(b)
       b <- c(b[b <= (range[2] - 1e-9)], Inf)
@@ -119,29 +119,37 @@ geomcoord_antarctica <- list(
   geom_antarctica_path
 )
 
-scale_color_models <- scale_color_manual(NULL,
-  values = c(
-    access = "black",
-    nsidc = "#1a5fb4"
-  ),
-  labels = c(
-    access = "ACCESS-S2",
-    nsidc = "NSIDC CDRV4"
-  )
+colours_models <- c(
+  S2 = "black",
+  S1 = "#a51d2d",
+  forecast = "black",
+  persistence = "#1a5fb4",
+  nsidc = "#1a5fb4"
 )
 
+labels_models <- c(
+  S2 = "ACCESS-S2",
+  S1 = "ACCESS-S1",
+  forecast = "Forecast",
+  persistence = "Persistence",
+  nsidc = "NSIDC CDRV4"
+)
+
+scale_color_models <- scale_color_manual(NULL,
+                                         values = colours_models,
+                                         labels = labels_models
+)
 
 scale_fill_models <- scale_fill_manual(NULL,
-  values = c(
-    access = "black",
-    nsidc = "#1a5fb4"
-  ),
-  labels = c(
-    access = "ACCESS-S2",
-    nsidc = "NSIDC CDRV4"
-  )
+                                         values = colours_models,
+                                         labels = labels_models
 )
 
+labels_extent <- function(x) {
+  m <- which.max(x)
+  x <- scales::label_number(scale = 1e-12)(x)
+  x[m] <- paste0(x[m], "\nM km²")
+  x
+}
 
-labels_extent <- scales::label_number(scale = 1e-12)
 labels_month <- setNames(month.abb, 1:12)
