@@ -1,0 +1,264 @@
+---
+title: "Figures"
+format: revealjs
+execute: 
+  echo: false
+---
+
+```{r setup}
+library(ggplot2)
+library(lubridate)
+library(data.table)
+library(metR)
+library(rcdo)
+
+cdo_options_set("-L")
+h <- here::here
+source(h("scripts/setup/functions.R"))
+```
+
+```{r extent}
+extent <- rbind(
+    nsidc = globals$nsidc_extent_daily |>
+        h() |> 
+        ReadNetCDF("aice") |>
+        _[, let(lon = NULL, lat = NULL)],
+    access = globals$access_extent_daily |>
+        h() |> 
+        ReadNetCDF("aice") |>
+        _[, let(lon = NULL, lat = NULL)],
+    idcol = "model"
+)
+```
+
+```{r median_ci}
+median_ci <- function(x, ci = .95) {
+  quantile(na.omit(x),  probs = c(0.5 - ci/2, 0.5, 0.5 + ci/2), names = FALSE) |> 
+    setNames(c("low", "mid", "high")) |> 
+    as.list()
+}
+```
+
+```{r fig-mean-extent}
+#| fig-cap: Mean sea ice extent for ACCESS-S2 reanalysis (black) and NSIDC (blue).
+
+extent |>  
+  copy() |>
+  _[aice == 0, aice := NA] |>  
+  _[!(month(time) == 2 & mday(time) == 29)] |> 
+  _[, time := update(time, year = 2001)] |> 
+  _[, median_ci(aice), b = .(time, model)]  |> 
+  ggplot(aes(time, mid)) +
+  geom_ribbon(aes(ymin = low, ymax = high, 
+                  color = model, fill = model), alpha = 0.3) +
+  geom_line(aes(color = model), linewidth = 1) +
+  scale_color_models +
+  scale_fill_models +
+  scale_y_continuous("Extent/area (million km²)",
+                     labels = labels_extent) +
+  scale_x_datetime(NULL, date_labels = "%B", date_breaks = "1 month")
+```
+
+------------------------------------------------------------------------
+
+```{r climatology}
+climatology <- merge(
+  globals$nsidc_climatology_monthly |> 
+    h() |> 
+    ReadNetCDF(c(nsidc = "aice")) |> 
+    _[, time := as.Date(time)],
+  
+  globals$access_renalysis_climatology_monthly |> 
+    h() |> 
+    ReadNetCDF(c(access = "aice")) |> 
+    _[, time := as.Date(time)]
+)
+```
+
+```{r fig-bias}
+#| fig-width: 9
+#| fig-height: 6
+#| fig-cap: ACCESS-S2 reanalysis sea ice concentration bias compared with NSIDC sea ice concentration.
+
+climatology |> 
+  ggplot(aes(xgrid, ygrid)) +
+  geom_contour_fill(aes(z = access - nsidc, fill = after_stat(level)), 
+                    breaks = anchor_limits(binwidth = 0.1, exclude = 0, range = c(-0.5, 0.5))) +
+  scale_fill_divergent_discretised("ACCESS-S2 bias", 
+                                  low = scales::muted("red"),
+                                  high = scales::muted("blue")) +
+  geomcoord_antarctica +
+  geom_antarctica_fill +
+  facet_wrap(~ lubridate::month(time, label = TRUE),
+             ncol = 6) +
+  wide_legend
+```
+
+------------------------------------------------------------------------
+
+```{r extent-monthly}
+extent <- merge(
+  ReadNetCDF(h(globals$nsidc_extent_monthly), 
+             vars = c(nsidc = "aice")) |> 
+    _[, let(lon = NULL, lat = NULL, time = as.Date(time))] |> 
+    _[, tidyr::complete(.SD, time = seq(min(time),
+                                        max(time),
+                                        "1 month"))],
+  ReadNetCDF(h(globals$access_extent_monthly), 
+             vars = c(access = "aice")) |> 
+    _[, let(lon = NULL, lat = NULL, time = as.Date(time))] |> 
+    _[, tidyr::complete(.SD, time = seq(min(time),
+                                        max(time),
+                                        "1 month"))]
+)  |> 
+  as.data.table()
+```
+
+```{r fig-extent-anom}
+#| fig-cap: Sea ice extent anomalies for ACCESS-S2 (black) and NSIDC (blue). Straight lines show a piecewise linear fit with nodes at 2005 and 2012.
+
+extent |> 
+  melt(id.vars = "time") |>
+  _[value == 0, value := NA]  |> 
+  _[, value := Anomaly(value, year(time) %between% c(1981, 2011), na.rm = TRUE), 
+    by = .(month(time), variable)] |> 
+  ggplot(aes(time, value)) +
+  geom_line(aes(color = variable)) +
+  geom_smooth(aes(color = variable), method = "lm",
+              formula = y ~ x +
+                I(pmax(x - as.numeric(as.Date("2005-12-01")), 0)) +
+                I(pmax(x - as.numeric(as.Date("2012-12-01")), 0)),
+              n = 100
+  ) +
+  scale_y_continuous("Extent/area (million km²)",
+                     labels = labels_extent) +
+  scale_x_date(NULL, expand = c(0, 0)) +
+  scale_color_models
+
+```
+
+------------------------------------------------------------------------
+
+```{r errors}
+rmse <- readRDS(h(globals$data_derived, "rmse.Rds")) |> 
+  _[type != "climatology"]
+
+iiee <- readRDS(h(globals$data_derived, "iiee.Rds")) |> 
+  _[type == "forecast"] |> 
+  _[, model := "S2"] |> 
+  rbind(
+    readRDS(h(globals$data_derived, "iiee-s1.Rds")) |> 
+      _[, model := "S1"]
+  )
+```
+
+```{r missing_daily}
+nsidc_mean_extent <- globals$nsidc_extent_daily |> 
+  h() |> 
+  ReadNetCDF("aice") |> 
+  _[, .(mean_extent = mean(aice)), by = yday(time)]
+
+missing_daily <- globals$nsidc_area_daily |> 
+  h() |> 
+  ReadNetCDF() |> 
+  _[is.na(aice) | aice < 1e6, .(time)]
+```
+
+```{r clean_errors}
+rmse |> 
+  _[time %in% missing_daily$time, value := NA] |> 
+  _[value < 0.01, value := NA] |> 
+  _[value > 3e13, value := NA] |> 
+  _[, time := as.Date(time)] |> 
+  _[, lag := as.numeric(time - time_forecast)] |> 
+  _[member == "mm", type := "mm"] 
+
+iiee |> 
+  _[time %in% missing_daily$time, value := NA] |> 
+  _[value < 0.01, value := NA] |> 
+  _[value > 3e13, value := NA] |> 
+  _[, time := as.Date(time)] |> 
+  _[, lag := as.numeric(time - time_forecast)] |> 
+  _[member == "mm", type := "mm"] 
+```
+
+```{r fig-rmse}
+#| fig-cap: Median and 95% coverage of sea ice concentration anomalies RMSE as a function of forecast lag for all forecast initialised on the first of each month compared with a reference forecast of persistence of anomalies. 
+
+rmse |> 
+  _[lag > 0] |> 
+  _[type != "mm"] |> 
+  _[, median_ci(value), 
+    by = .(lag, type, measure, month(time_forecast))] |> 
+  ggplot(aes(lag, mid)) +
+  geom_ribbon(aes(ymin = low, 
+                  ymax = high, 
+                  color = type, 
+                  fill = type), alpha = 0.1) +
+  geom_line(aes(color = type)) +
+  labs(y = "RMSE", 
+       x = "Lag") +
+  facet_wrap(~ month, labeller = labeller(month = labels_month))
+```
+
+------------------------------------------------------------------------
+
+```{r fig-iiee}
+#| fig-cap: Median and 95% coverage of Integrated Ice Edge Error as a function of forecast lag for all forecast initialised on the first of each month for ACCESS-S1 and ACCESS-S2 hindcasts. 
+ 
+iiee |> 
+  _[type != "mm"] |> 
+  _[lag > 0] |> 
+  _[, month := lubridate::month(time_forecast, label = TRUE)]  |> 
+  _[!(month == "Jan" & member == "07")] |> 
+  _[, median_ci(value), 
+    by = .(lag, model, measure, month(time_forecast))] |> 
+  ggplot(aes(lag, mid)) +
+  geom_ribbon(aes(ymin = low, 
+                  ymax = high, 
+                  color = model, 
+                  fill = model), alpha = 0.1) +
+  geom_line(aes(color = model)) +
+  labs(y = "Integrated Ice Edge Error", 
+       x = "Lag") +
+  facet_wrap(~ month, labeller = labeller(month = labels_month))
+```
+
+------------------------------------------------------------------------
+
+```{r iiee_clean}
+iiee_clean <- iiee |> 
+    copy() |> 
+    # _[model == "S2"] |> 
+    _[member != "mm"] |> 
+    _[, time := as.Date(time)] |> 
+    _[, lag := as.numeric(time - time_forecast)] |> 
+    _[lag > 0] |> 
+    _[!(month(time_forecast) == 1 & member == "07" & model == "S1")] 
+```
+
+```{r fig-iiee-mean-spread}
+#| fig-cap: Mean spread of IIEE at different lags for differnet models
+iiee_clean |>     
+    _[, sd(value, na.rm = TRUE), by = .(model, lag, time_forecast)] |> 
+    _[, mean(V1, na.rm = TRUE), by = .(model, lag)]  |> 
+    ggplot(aes(lag, V1)) +
+    geom_line(aes(color = model)) +
+    scale_y_continuous("Mean spread of IEEE", 
+                       labels = labels_extent) +
+    scale_x_continuous("Lag") 
+```
+
+------------------------------------------------------------------------
+
+```{r fig-iiee-spread-mean}
+#| fig-cap: Spread of the mean IIEE at different lags for differnet models
+iiee_clean |>     
+    _[, mean(value, na.rm = TRUE), by = .(model, lag, time_forecast)] |> 
+    _[, sd(V1, na.rm = TRUE), by = .(model, lag)]  |> 
+    ggplot(aes(lag, V1)) +
+    geom_line(aes(color = model)) +
+    scale_y_continuous("Spread of mean IEEE",
+                       labels = labels_extent) +
+    scale_x_continuous("Lag")
+```
